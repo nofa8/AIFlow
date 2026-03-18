@@ -1,0 +1,12 @@
+{
+  "name": "realtime-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node websocket.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "amqplib": "^0.10.3"
+  }
+}
