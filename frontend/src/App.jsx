@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : `http://${window.location.hostname}:3000`
-
-const WS_URL = window.location.hostname === 'localhost'
-  ? 'ws://localhost:4000'
-  : `ws://${window.location.hostname}:4000`
+const API_BASE = '/api'
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
 
 export default function App() {
   const [tasks, setTasks] = useState([])

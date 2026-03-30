@@ -5,10 +5,11 @@ networks:
 volumes:
   postgres_data:
   uploads_data:
+  redis_data:
 
 services:
 
-  # ─── Infrastructure ─────────────────────────────────────────────
+  # ─── 1. Infrastructure ──────────────────────────────────────────
 
   postgres:
     image: docker.io/postgres:15
@@ -20,8 +21,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./task-service/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
       interval: 5s
@@ -35,15 +34,28 @@ services:
     networks:
       - aiflow-net
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "15672:15672" # Management UI
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 10s
       retries: 10
 
-  # ─── Backend Services ───────────────────────────────────────────
+  redis:
+    image: docker.io/redis:7
+    container_name: aiflow_redis
+    restart: unless-stopped
+    networks:
+      - aiflow-net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── 2. Backend Services ────────────────────────────────────────
 
   api-gateway:
     build: ./api-gateway
@@ -52,8 +64,6 @@ services:
     env_file: .env
     networks:
       - aiflow-net
-    ports:
-      - "3000:3000"
     depends_on:
       task-service:
         condition: service_started
@@ -71,6 +81,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   worker:
@@ -93,13 +105,11 @@ services:
     env_file: .env
     networks:
       - aiflow-net
-    ports:
-      - "4000:4000"
     depends_on:
       rabbitmq:
         condition: service_healthy
 
-  # ─── Frontend ───────────────────────────────────────────────────
+  # ─── 3. Frontend ────────────────────────────────────────────────
 
   frontend:
     build: ./frontend
@@ -107,8 +117,21 @@ services:
     restart: unless-stopped
     networks:
       - aiflow-net
+    # No port 5173 exposure; NGINX handles it
+
+  # ─── 4. API Proxy (Entrypoint) ──────────────────────────────────
+
+  nginx:
+    image: docker.io/nginx:latest
+    container_name: aiflow_nginx
+    restart: unless-stopped
+    networks:
+      - aiflow-net
     ports:
-      - "5173:5173"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro,z
     depends_on:
-      api-gateway:
-        condition: service_started
+      - frontend
+      - api-gateway
+      - realtime-service

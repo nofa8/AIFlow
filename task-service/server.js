@@ -4,6 +4,8 @@ const amqp = require("amqplib");
 const multer = require("multer");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const redis = require("redis");
+
 
 const app = express();
 app.use(express.json());
@@ -68,6 +70,26 @@ async function connectRabbitMQ() {
   throw new Error("Could not connect to RabbitMQ");
 }
 
+// ─── Redis (Caching) ───────────────────────────────────────────
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+
+async function connectRedis() {
+  let retries = 10;
+  while (retries) {
+    try {
+      await redisClient.connect();
+      console.log("[Task Service] Redis connected");
+      return;
+    } catch (err) {
+      console.log(`[Task Service] Redis retry… (${retries} left)`);
+      retries -= 1;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  throw new Error("Could not connect to Redis");
+}
+
+
 // ─── Routes ─────────────────────────────────────────────────────
 
 // Health
@@ -128,16 +150,31 @@ app.get("/", async (_req, res) => {
   }
 });
 
-// Get single task
+// Get single task (with Caching)
 app.get("/:id", async (req, res) => {
+  const { id } = req.params;
+
   try {
-    const result = await pool.query("SELECT * FROM tasks WHERE id = $1", [
-      req.params.id,
-    ]);
+    // 1. Check Cache
+    const cachedTask = await redisClient.get(`task:${id}`);
+    if (cachedTask) {
+      console.log(`[Task Service] Cache hit for task ${id}`);
+      return res.json({ source: "redis", data: JSON.parse(cachedTask) });
+    }
+
+    // 2. Cache Miss -> Query DB
+    const result = await pool.query("SELECT * FROM tasks WHERE id = $1", [id]);
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Task not found" });
     }
-    res.json(result.rows[0]);
+
+    const task = result.rows[0];
+
+    // 3. Save to Cache for 60 seconds
+    await redisClient.setEx(`task:${id}`, 60, JSON.stringify(task));
+
+    res.json({ source: "postgres", data: task });
   } catch (err) {
     console.error("[Task Service] Error fetching task:", err.message);
     res.status(500).json({ error: "Internal server error" });
@@ -147,7 +184,9 @@ app.get("/:id", async (req, res) => {
 // ─── Start ──────────────────────────────────────────────────────
 async function start() {
   await connectDB();
+  await connectRedis();
   await connectRabbitMQ();
+
   app.listen(PORT, () => {
     console.log(`[Task Service] listening on port ${PORT}`);
   });

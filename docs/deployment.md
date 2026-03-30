@@ -10,20 +10,22 @@ All services rely on the `.env` file at the root. Key variables include:
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | Database root password | `aiflow_secret` |
 | `RABBITMQ_HOST` | Hostname for the broker | `rabbitmq` |
-| `API_PORT` | Public port for the gateway | `3000` |
+| `REDIS_URL` | Redis connection string | `redis://redis:6379` |
+| `API_PORT` | Port for the gateway | `3000` |
 | `FRONTEND_PORT` | Public port for the web UI | `5173` |
 
 ## Service Orchestration
 
 ### Dependency Management
 The services use Docker `healthchecks` to ensure stable startup sequences:
-1.  **PostgreSQL** and **RabbitMQ** start first.
-2.  **Task Service** and **Worker** wait for DB/Broker to be `healthy`.
+1.  **PostgreSQL**, **RabbitMQ**, and **Redis** start first.
+2.  **Task Service** and **Worker** wait for DB/Broker/Cache to be `healthy`.
 3.  **API Gateway** starts once the Task Service is ready.
+4.  **NGINX** starts as the final routing layer.
 
 ### Network Isolation
 All services communicate over a private bridge network called `aiflow-net`.
-- Only the **API Gateway** and **Frontend** expose ports to the host machine.
+- Only **NGINX** (Port 80) and **RabbitMQ Management** (Port 15672) expose ports to the host machine.
 - Direct access to the database or message broker is restricted to the internal network.
 
 ## Persistence

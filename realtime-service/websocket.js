@@ -1,8 +1,18 @@
 const WebSocket = require("ws");
 const amqp = require("amqplib");
+const http = require("http");
 
 const PORT = process.env.REALTIME_PORT || 4000;
+const HEALTH_PORT = 4001;
 const { REALTIME_QUEUE } = require("./shared/queues");
+
+// ─── Health Endpoint (HTTP) ────────────────────────────────────
+http.createServer((_req, res) => {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ status: "ok", service: "realtime-service" }));
+}).listen(HEALTH_PORT, () => {
+  console.log(`[Realtime] Health endpoint on port ${HEALTH_PORT}`);
+});
 
 // ─── WebSocket Server ──────────────────────────────────────────
 const wss = new WebSocket.Server({ port: PORT });

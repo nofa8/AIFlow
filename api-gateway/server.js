@@ -11,12 +11,16 @@ app.use(morgan("combined"));
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const taskServiceProxy = createProxyMiddleware({
-  target: `http://task-service:${process.env.TASK_SERVICE_PORT || 3001}`,
+  target: `http://aiflow_task_service:${process.env.TASK_SERVICE_PORT || 3001}`,
   changeOrigin: true,
 });
 
-app.use('/tasks', taskServiceProxy);
+app.use('/api/tasks', taskServiceProxy);
 app.use(express.json());
+// ─── Health ──────────────────────────────────────────────────────
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", service: "api-gateway" });
+});
 
 // ─── Start ──────────────────────────────────────────────────────
 app.listen(PORT, () => {
