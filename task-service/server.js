@@ -102,8 +102,18 @@ app.post("/", upload.single("file"), async (req, res) => {
   try {
     const { type = "sentiment", input } = req.body;
 
-    if (!input) {
+    // ─── Input Validation ─────────────────────────────────────
+    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords"];
+    if (!ALLOWED_TYPES.includes(type)) {
+      return res.status(400).json({ error: `Invalid task type. Allowed: ${ALLOWED_TYPES.join(", ")}` });
+    }
+
+    if (!input || typeof input !== "string" || !input.trim()) {
       return res.status(400).json({ error: "input is required" });
+    }
+
+    if (input.length > 5000) {
+      return res.status(400).json({ error: "input exceeds maximum length of 5000 characters" });
     }
 
     const filePath = req.file ? req.file.filename : null;

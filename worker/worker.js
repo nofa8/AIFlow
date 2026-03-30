@@ -1,5 +1,16 @@
 const amqp = require("amqplib");
 const { Pool } = require("pg");
+const redis = require("redis");
+const http = require("http");
+
+// ─── Health Endpoint (HTTP) ────────────────────────────────────
+const HEALTH_PORT = process.env.WORKER_HEALTH_PORT || 4002;
+http.createServer((_req, res) => {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ status: "ok", service: "worker" }));
+}).listen(HEALTH_PORT, () => {
+  console.log(`[Worker] Health endpoint on port ${HEALTH_PORT}`);
+});
 
 const { TASK_QUEUE, REALTIME_QUEUE } = require("./shared/queues");
 const { createEventMessage } = require("./shared/taskSchema");
@@ -12,6 +23,25 @@ const pool = new Pool({
   password: process.env.POSTGRES_PASSWORD,
   database: process.env.POSTGRES_DB,
 });
+
+// ─── Redis (Cache Invalidation) ────────────────────────────────
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+
+async function connectRedis() {
+  let retries = 10;
+  while (retries) {
+    try {
+      await redisClient.connect();
+      console.log("[Worker] Redis connected");
+      return;
+    } catch (err) {
+      console.log(`[Worker] Redis retry… (${retries} left)`);
+      retries -= 1;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  throw new Error("Could not connect to Redis");
+}
 
 // ─── AI Processing (simulated) ─────────────────────────────────
 async function processTask(type, input) {
@@ -72,6 +102,7 @@ async function connectRabbitMQ() {
 
 // ─── Main Consumer Loop ────────────────────────────────────────
 async function start() {
+  await connectRedis();
   const channel = await connectRabbitMQ();
 
   // Prefetch 1 → enables horizontal scaling of workers
@@ -108,7 +139,10 @@ async function start() {
         [JSON.stringify(result), taskId]
       );
 
-      console.log(`[Worker] Task ${taskId} completed`);
+      // Invalidate Redis cache so next read gets fresh data
+      await redisClient.del(`task:${taskId}`);
+
+      console.log(`[Worker] Task ${taskId} completed (cache invalidated)`);
 
       // Notify realtime service: TASK_COMPLETED
       const completeEvent = createEventMessage(taskId, TASK_COMPLETED, result);
@@ -122,6 +156,9 @@ async function start() {
         "UPDATE tasks SET status = 'failed', result = $1, updated_at = NOW() WHERE id = $2",
         [JSON.stringify({ error: err.message }), taskId]
       );
+
+      // Invalidate Redis cache on failure too
+      await redisClient.del(`task:${taskId}`);
 
       // Notify realtime service: TASK_FAILED
       const failEvent = createEventMessage(taskId, TASK_FAILED, null, err.message);

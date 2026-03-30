@@ -1,35 +1,69 @@
 # ⚡ AIFlow
 
-A high-performance, cloud-native microservices platform for processing AI tasks. AIFlow leverages a distributed architecture to provide asynchronous job processing, real-time status updates via WebSockets, and persistent storage for large datasets.
+A high-performance, cloud-native microservices platform for processing AI tasks. AIFlow leverages a distributed, event-driven architecture to provide asynchronous job processing, real-time status updates via WebSockets, and intelligent caching with automatic invalidation.
 
 Designed as a **Master's level Cloud Computing project**, it emphasizes architecture complexity, service isolation, and production-grade provisioning.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🏗️ Architecture
 
-AIFlow is composed of 7 distinct services orchestrated via Docker Compose:
-
-*   **API Gateway**: Unified entry point and request router.
-*   **Task Service**: Manages task lifecycle, database persistence, and file uploads.
-*   **Worker Service**: Consumes and processes AI tasks (Sentiment, Summarization, etc.).
-*   **Realtime Service**: Pushes live status updates to clients using WebSockets.
-*   **Frontend**: Modern React dashboard for task management.
-*   **PostgreSQL**: Relational storage for task metadata and results.
-*   **RabbitMQ**: High-reliability message broker for inter-service communication.
+AIFlow is composed of **9 distinct services** orchestrated via Docker Compose, with NGINX as the single entrypoint:
 
 ```mermaid
-graph TD
-    User([User]) --> Frontend[React Frontend]
-    User -->|REST| Gateway[API Gateway]
-    Gateway -->|Forward| TaskService[Task Service]
-    TaskService -->|Persist| DB[(PostgreSQL)]
-    TaskService -->|Queue Task| MQ[RabbitMQ]
-    MQ -->|Pop| Worker[Worker Service]
-    Worker -->|Update Status| DB
-    Worker -->|Push Event| MQ
-    MQ -->|Notification| Realtime[Realtime Service]
-    Realtime -->|WebSocket| Frontend
+graph TB
+    subgraph Client
+        Browser["🌐 Browser"]
+    end
+
+    subgraph entrypoint["Entrypoint - Port 80"]
+        NGINX["🔀 NGINX Reverse Proxy"]
+    end
+
+    subgraph frontend_svc["Frontend"]
+        FE["⚛️ React + Vite"]
+    end
+
+    subgraph backend["Backend Services"]
+        GW["🚪 API Gateway :3000"]
+        TS["📋 Task Service :3001"]
+        WK["⚙️ Worker"]
+        RT["📡 Realtime Service :4000"]
+    end
+
+    subgraph infra["Infrastructure"]
+        PG[("🐘 PostgreSQL 15")]
+        RMQ["🐇 RabbitMQ 3"]
+        RD["⚡ Redis 7"]
+    end
+
+    Browser -->|"HTTP / WS"| NGINX
+    NGINX -->|"/"| FE
+    NGINX -->|"/api/*"| GW
+    NGINX -->|"/ws"| RT
+    GW -->|"proxy /tasks"| TS
+    TS -->|"read/write"| PG
+    TS -->|"cache read"| RD
+    TS -->|"publish task"| RMQ
+    RMQ -->|"consume task"| WK
+    WK -->|"update status"| PG
+    WK -->|"invalidate cache"| RD
+    WK -->|"publish event"| RMQ
+    RMQ -->|"consume event"| RT
+    RT -->|"WebSocket push"| Browser
+```
+
+### System Flow
+
+```
+Frontend → NGINX → API Gateway → Task Service → PostgreSQL (persist)
+                                               → RabbitMQ (publish)
+                                                    ↓
+                                               Worker (process)
+                                                    ↓
+                                               RabbitMQ (event)
+                                                    ↓
+                                               Realtime Service → WebSocket → Frontend (live update)
 ```
 
 ---
@@ -37,56 +71,71 @@ graph TD
 ## 🚀 Quick Start
 
 ### Prerequisites
-*   Docker & Docker Compose
-*   (Optional) Node.js 20+ for local development
 
-### Deployment
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/your-repo/aiflow.git
-    cd aiflow
-    ```
+- Docker & Docker Compose (or Podman)
 
-2.  **Configure Environment**:
-    ```bash
-    cp .env.example .env
-    ```
+### Launch
 
-3.  **Launch the cluster**:
-    ```bash
-    docker compose up -d --build
-    ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-repo/aiflow.git
+cd aiflow
 
-4.  **Access the Dashboard**:
-    Open [http://localhost:5173](http://localhost:5173) in your browser.
+# 2. Configure environment
+cp .env.example .env
 
----
+# 3. Launch all 9 services
+docker compose up -d --build
 
-## 📚 Documentation
+# 4. Open the dashboard
+open http://localhost
+```
 
-Detailed documentation is available in the `docs/` folder:
+All services will start in dependency order with health checks. NGINX becomes available once all backends are healthy.
 
-*   📖 **[Architecture Details](docs/architecture.md)**: Deep dive into the system design and communication patterns.
-*   🔌 **[API Guide](docs/api-guide.md)**: Endpoints, request schemas, and usage examples.
-*   📦 **[Deployment & Infra](docs/deployment.md)**: Environment variables, healthchecks, and volumes.
-*   🛠️ **[Development Guide](docs/development-guide.md)**: How to extend the platform or add new AI models.
-*   ✅ **[Verification Procedures](next-step.md)**: Step-by-step guide to testing the full flow.
+### Scale Workers
+
+```bash
+docker compose up -d --scale worker=3
+```
 
 ---
 
 ## ✨ Key Features
 
-*   **Asynchronous Scalability**: Decoupled processing allows scaling workers horizontally.
-*   **Real-time UX**: Instant feedback via WebSocket event bus.
-*   **Fault Tolerance**: Automatic service recovery and health monitoring.
-*   **Persistent volumes**: Docker-managed storage for database data and file uploads.
-*   **Modular Contracts**: Shared schema definition for consistent inter-service communication.
+| Feature | Implementation |
+|---------|---------------|
+| **NGINX Reverse Proxy** | Single entrypoint (port 80), no direct service exposure |
+| **Async Processing** | RabbitMQ with durable queues (ai_tasks + task_events) |
+| **Real-time Updates** | WebSocket broadcasting: queued → processing → completed |
+| **Redis Caching** | Read-through cache (60s TTL) with worker-side invalidation |
+| **Horizontal Scaling** | Workers scale with `prefetch(1)` for fair distribution |
+| **Health Monitoring** | All services have healthchecks with `service_healthy` dependencies |
+| **Security Headers** | X-Content-Type-Options, X-Frame-Options, XSS protection |
+| **Input Validation** | Type whitelist, length limits, proper error responses |
+| **File Uploads** | Multer + Docker volumes for persistent storage |
+| **Auto Recovery** | `restart: on-failure` across all services |
 
 ---
 
-## 🎓 Academic Requirements Compliance
+## 📚 Documentation
 
-- **Architecture Complexity**: 7 isolated services using standard cloud patterns.
-- **Provisioning Code**: Comprehensive `docker-compose.yml` with healthchecks and dependencies.
-- **Documentation**: Professional README and technical deep-dives.
-- **Deployment Strategy**: Ready-to-run containerized environment.
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design, Mermaid diagram, communication patterns |
+| [API Guide](docs/api-guide.md) | Endpoints, request schemas, usage examples |
+| [Deployment](docs/deployment.md) | Environment variables, healthchecks, volumes |
+| [Development Guide](docs/development-guide.md) | How to extend the platform |
+| [Verification](next-step.md) | Step-by-step testing procedures |
+
+---
+
+## 🎓 Academic Requirements
+
+| Criteria | Coverage |
+|----------|----------|
+| **Architecture Complexity** | 9 isolated services with event-driven patterns |
+| **Provisioning** | Docker Compose with healthchecks, volumes, dependency ordering |
+| **Deployment** | Single-command startup, NGINX reverse proxy, horizontal scaling |
+| **Documentation** | Architecture diagrams, API guide, deployment guide |
+| **Advanced Features** | Redis caching, WebSocket real-time, security hardening |

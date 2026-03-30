@@ -15,7 +15,7 @@ const taskServiceProxy = createProxyMiddleware({
   changeOrigin: true,
 });
 
-app.use('/api/tasks', taskServiceProxy);
+app.use('/tasks', taskServiceProxy);
 app.use(express.json());
 // ─── Health ──────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
