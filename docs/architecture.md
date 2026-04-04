@@ -27,6 +27,7 @@ graph TB
         PG[("🐘 PostgreSQL 15")]
         RMQ["🐇 RabbitMQ 3"]
         RD["⚡ Redis 7"]
+        MN["🪣 MinIO (S3)"]
     end
 
     Browser -->|"HTTP / WS"| NGINX
@@ -38,9 +39,12 @@ graph TB
     GW -->|"proxy /tasks"| TS
     TS -->|"read/write"| PG
     TS -->|"cache read"| RD
+    TS -->|"store payload"| MN
 
     TS -->|"publish task"| RMQ
     RMQ -->|"consume task"| WK
+
+    WK -->|"fetch payload"| MN
 
     WK -->|"update status"| PG
     WK -->|"invalidate cache"| RD
@@ -53,7 +57,7 @@ graph TB
 ## Services
 
 | Service | Technology | Port | Purpose |
-|---------|-----------|------|---------|
+| --- | --- | --- | --- |
 | NGINX | Nginx (Latest) | 80 | Central Proxy / Entrypoint |
 | Frontend | React + Vite | 5173* | User interface |
 | API Gateway | Express.js | 3000* | Routing, auth, proxy |
@@ -63,6 +67,7 @@ graph TB
 | PostgreSQL | PostgreSQL 15 | 5432* | Persistent data storage |
 | RabbitMQ | RabbitMQ 3 | 5672 | Message broker |
 | Redis | Redis 7 | 6379* | Caching + invalidation |
+| MinIO | Linux/MinIO | 9000*, 9001* | S3-Compatible Storage |
 
 \* *Internal ports only, not exposed — managed behind NGINX proxy.*
 
@@ -70,28 +75,36 @@ graph TB
 
 ### 1. Synchronous (REST)
 
-```
+```text
 Browser → NGINX :80 → API Gateway :3000 → Task Service :3001 → PostgreSQL / Redis
 ```
 
 ### 2. Asynchronous (Message Queue)
 
-```
+```text
 Task Service  ──publish──→  RabbitMQ (ai_tasks)   ──consume──→  Worker
 Worker        ──publish──→  RabbitMQ (task_events) ──consume──→  Realtime Service
 ```
 
-### 3. Real-Time (WebSocket)
+### 3. S3-Compatible Object Storage Flow
 
-```
+- **Safe Gateway Filtering**: Ingress blocks objects > 5MB via `multer.memoryStorage()` defending cluster memory limits.
+- **Storage Queue**: Gateway dynamically mints objects onto MinIO (`objectName`/`mimeType`), passing purely text metadata to RabbitMQ.
+- **Node Execution**: The Worker securely streams binaries back into `/tmp/` and handles cleanup securely inside a `finally` block preventing container saturation.
+
+### 4. Real-Time (WebSocket)
+
+```text
 Realtime Service ──WebSocket push──→ Browser (live status updates)
 ```
 
-## Task Lifecycle
+## Task Lifecycle & Fallover
 
-```
+```text
 queued → processing → completed | failed
 ```
+
+If the primary API (Hugging Face / Gemini) experiences a timeout event during the `processing` state, a robust `try/catch` sequence intercepts the exception and seamlessly reroutes the prediction to a resilient internal `mock-fallback`. This prevents cascade crashes and retains Real-Time Client visualization!
 
 ## Caching Strategy
 

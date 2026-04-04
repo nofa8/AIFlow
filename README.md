@@ -8,7 +8,7 @@ Designed as a **Master's level Cloud Computing project**, it emphasizes architec
 
 ## 🏗️ Architecture
 
-AIFlow is composed of **9 distinct services** orchestrated via Docker Compose, with NGINX as the single entrypoint:
+AIFlow is composed of **10 distinct services** orchestrated via Docker Compose, with NGINX as the single entrypoint:
 
 ```mermaid
 graph TB
@@ -35,6 +35,7 @@ graph TB
         PG[("🐘 PostgreSQL 15")]
         RMQ["🐇 RabbitMQ 3"]
         RD["⚡ Redis 7"]
+        MN["🪣 MinIO (S3 Storage)"]
     end
 
     Browser -->|"HTTP / WS"| NGINX
@@ -44,8 +45,10 @@ graph TB
     GW -->|"proxy /tasks"| TS
     TS -->|"read/write"| PG
     TS -->|"cache read"| RD
+    TS -->|"store payload"| MN
     TS -->|"publish task"| RMQ
     RMQ -->|"consume task"| WK
+    WK -->|"fetch payload"| MN
     WK -->|"update status"| PG
     WK -->|"invalidate cache"| RD
     WK -->|"publish event"| RMQ
@@ -55,8 +58,9 @@ graph TB
 
 ### System Flow
 
-```
-Frontend → NGINX → API Gateway → Task Service → PostgreSQL (persist)
+```text
+Frontend → NGINX → API Gateway → Task Service → MinIO (object storage)
+                                               → PostgreSQL (persist)
                                                → RabbitMQ (publish)
                                                     ↓
                                                Worker (process)
@@ -104,7 +108,7 @@ docker compose up -d --scale worker=3
 ## ✨ Key Features
 
 | Feature | Implementation |
-|---------|---------------|
+| --- | --- |
 | **NGINX Reverse Proxy** | Single entrypoint (port 80), no direct service exposure |
 | **Async Processing** | RabbitMQ with durable queues (ai_tasks + task_events) |
 | **Real-time Updates** | WebSocket broadcasting: queued → processing → completed |
@@ -113,7 +117,8 @@ docker compose up -d --scale worker=3
 | **Health Monitoring** | All services have healthchecks with `service_healthy` dependencies |
 | **Security Headers** | X-Content-Type-Options, X-Frame-Options, XSS protection |
 | **Input Validation** | Type whitelist, length limits, proper error responses |
-| **File Uploads** | Multer + Docker volumes for persistent storage |
+| **MinIO Object Storage** | S3-compatible, persistent distributed storage avoiding local volumes |
+| **Multimodal AI** | Direct Gemini API integrations for Image, PDF, and URL scraping pipelines |
 | **Auto Recovery** | `restart: on-failure` across all services |
 
 ---
@@ -121,7 +126,7 @@ docker compose up -d --scale worker=3
 ## 📚 Documentation
 
 | Document | Description |
-|----------|-------------|
+| --- | --- |
 | [Architecture](docs/architecture.md) | System design, Mermaid diagram, communication patterns |
 | [API Guide](docs/api-guide.md) | Endpoints, request schemas, usage examples |
 | [Deployment](docs/deployment.md) | Environment variables, healthchecks, volumes |
@@ -133,9 +138,9 @@ docker compose up -d --scale worker=3
 ## 🎓 Academic Requirements
 
 | Criteria | Coverage |
-|----------|----------|
-| **Architecture Complexity** | 9 isolated services with event-driven patterns |
+| --- | --- |
+| **Architecture Complexity** | 10 isolated services with resilient event-driven patterns |
 | **Provisioning** | Docker Compose with healthchecks, volumes, dependency ordering |
 | **Deployment** | Single-command startup, NGINX reverse proxy, horizontal scaling |
 | **Documentation** | Architecture diagrams, API guide, deployment guide |
-| **Advanced Features** | Redis caching, WebSocket real-time, security hardening |
+| **Advanced Features** | S3 MinIO storage, Redis caching, Multimodal AI scraping, UI Markdown React logic |

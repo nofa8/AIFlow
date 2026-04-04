@@ -10,11 +10,13 @@ The API Gateway provides a unified REST interface to interact with the AIFlow pr
 ## Endpoints
 
 ### 1. Health Check
+
 `GET /health`
 
 Verifies that the API Gateway is operational.
 
 **Response**:
+
 ```json
 {
   "status": "ok",
@@ -23,6 +25,7 @@ Verifies that the API Gateway is operational.
 ```
 
 ### 2. Create Task
+
 `POST /tasks`
 
 Submits a new AI processing task. Supports both JSON and Multipart Form-Data (for file uploads).
@@ -33,17 +36,19 @@ Submits a new AI processing task. Supports both JSON and Multipart Form-Data (fo
 **Body (JSON)**:
 ```json
 {
-  "type": "sentiment | summarize | keywords",
-  "input": "Text to process..."
+  "type": "sentiment | summarize | keywords | hf-sentiment | gemini-chat | url-summary",
+  "input": "Text, payload, or URL to process..."
 }
 ```
 
-**Body (Form-Data)**:
-*   `type`: Task type string.
-*   `input`: Input text.
-*   `file`: (Optional) File attachment for processing.
+**Body (Form-Data)** (Required for `gemini-image` and `gemini-pdf`):
+
+- `type`: "gemini-image" or "gemini-pdf"
+- `input`: (Optional) Text prompt.
+- `file`: The target file (Requires `image/*` or `application/pdf` MIME types. Max 5MB).
 
 **Response (201 Created)**:
+
 ```json
 {
   "id": "uuid-v4",
@@ -56,11 +61,13 @@ Submits a new AI processing task. Supports both JSON and Multipart Form-Data (fo
 ```
 
 ### 3. List Tasks
+
 `GET /tasks`
 
 Retrieves the latest 50 tasks.
 
 **Response**:
+
 ```json
 [
   {
@@ -74,28 +81,35 @@ Retrieves the latest 50 tasks.
 ```
 
 ### 4. Get Task Details
+
 `GET /tasks/:id`
 
 Retrieves the full details of a specific task, including results if processing is finished.
 
 **Response**:
+
 ```json
 {
   "id": "uuid-v4",
   "status": "completed",
   "result": {
-    "label": "positive",
-    "score": 0.98,
-    "model": "aiflow-sentiment-v1"
+    "provider": "gemini",
+    "type": "url-summary",
+    "data": {
+       "text": "The extracted and summarized text."
+    }
   }
 }
 ```
+
+*Note: In the event of an upstream API failure, the result `provider` may return as `mock-fallback` with synthesized data.*
 
 ---
 
 ## Error Handling
 
 The API uses standard HTTP status codes:
-*   `400 Bad Request`: Missing `input` or invalid format.
-*   `404 Not Found`: Task ID does not exist.
-*   `500 Internal Server Error`: Downstream service communication failure.
+
+- `400 Bad Request`: Missing `input` or invalid format.
+- `404 Not Found`: Task ID does not exist.
+- `500 Internal Server Error`: Downstream service communication failure.
