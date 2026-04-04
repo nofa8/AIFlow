@@ -2,6 +2,7 @@ const axios = require("axios");
 const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const { PDFParse } = require("pdf-parse");
+const cheerio = require("cheerio");
 
 // Check API keys on startup explicitly as requested
 if (!process.env.GEMINI_API_KEY) {
@@ -140,9 +141,33 @@ async function geminiPDF(filePath) {
   };
 }
 
+async function geminiURLSummary(url) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Missing Gemini API key");
+  }
+
+  const { data: html } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }});
+  const $ = cheerio.load(html);
+  
+  // Extract text broadly
+  const pageText = $('body').text().replace(/\s+/g, ' ').slice(0, 3000);
+
+  const res = await gemini.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: `Summarize this webpage content:\n${pageText}`
+  });
+
+  return {
+    provider: "gemini",
+    type: "url-summary",
+    data: { text: res.text }
+  };
+}
+
 module.exports = {
   hfSentiment,
   geminiChat,
   geminiImage,
-  geminiPDF
+  geminiPDF,
+  geminiURLSummary
 };

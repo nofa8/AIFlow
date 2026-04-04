@@ -105,7 +105,7 @@ app.post("/", upload.single("file"), async (req, res) => {
     const isMultimodal = type === "gemini-image" || type === "gemini-pdf";
 
     // ─── Input Validation ─────────────────────────────────────
-    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat", "gemini-image", "gemini-pdf"];
+    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat", "gemini-image", "gemini-pdf", "url-summary"];
     if (!ALLOWED_TYPES.includes(type)) {
       return res.status(400).json({ error: `Invalid task type. Allowed: ${ALLOWED_TYPES.join(", ")}` });
     }

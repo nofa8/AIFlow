@@ -43,7 +43,7 @@ async function connectRedis() {
   throw new Error("Could not connect to Redis");
 }
 
-const { hfSentiment, geminiChat, geminiImage, geminiPDF } = require("./aiClients");
+const { hfSentiment, geminiChat, geminiImage, geminiPDF, geminiURLSummary } = require("./aiClients");
 const { downloadFile } = require("./minioClient");
 const fs = require("fs");
 
@@ -158,6 +158,19 @@ async function processTask(type, input, objectName, mimeType) {
         if (localPdfFile && fs.existsSync(localPdfFile)) {
           fs.unlinkSync(localPdfFile);
         }
+      }
+
+    case "url-summary":
+      console.log(`[AI] Processing url-summary with Gemini`);
+      try {
+        return await geminiURLSummary(input);
+      } catch (err) {
+        console.warn(`[AI] URL summary failed: ${err.message}`);
+        return {
+          provider: "mock-fallback",
+          type: "url-summary",
+          data: { text: "Fallback: Could not scrape and summarize URL." }
+        };
       }
 
     default:

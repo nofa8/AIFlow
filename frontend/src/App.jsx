@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 const API_BASE = '/api'
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
@@ -179,13 +180,14 @@ export default function App() {
           </div>
         );
 
+      case 'url-summary':
       case 'gemini-image':
       case 'gemini-pdf':
       case 'gemini-chat':
       case 'summarize':
         return (
-          <div className="result-text-block">
-            <p>{data.text || data.summary || data.response}</p>
+          <div className="result-text-block markdown-body">
+            <ReactMarkdown>{data.text || data.summary || data.response}</ReactMarkdown>
           </div>
         );
 
@@ -224,13 +226,14 @@ export default function App() {
                 <option value="gemini-chat">AI Chat (Gemini)</option>
                 <option value="gemini-image">Image Caption (Gemini)</option>
                 <option value="gemini-pdf">PDF Summary (Gemini)</option>
+                <option value="url-summary">URL Summary (Gemini)</option>
               </optgroup>
             </select>
             <textarea
               id="task-input"
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={requiresFile ? "Optional instructions (e.g., 'Extract names')..." : "Enter text to analyze…"}
+              placeholder={requiresFile ? "Optional instructions (e.g., 'Extract names')..." : (type === 'url-summary' ? "Enter URL to scrape and summarize…" : "Enter text to analyze…")}
               rows={2}
             />
           </div>
@@ -281,6 +284,7 @@ export default function App() {
                   <span className="task-type">
                     {task.type === 'gemini-image' ? '🖼️ Image AI' : 
                      task.type === 'gemini-pdf' ? '📄 PDF AI' : 
+                     task.type === 'url-summary' ? '🌐 URL AI' :
                      task.type.includes('sentiment') ? '🎭 Sentiment' : 
                      '💬 Text AI'}
                   </span>

@@ -476,12 +476,29 @@ body {
 }
 .kw-count { background: #1f2937; padding: 2px 6px; border-radius: 10px; font-size: 0.75rem; color: #9ca3af; }
 
-/* --- Text Blocks --- */
-.result-text-block p {
+/* --- Text Blocks & Markdown --- */
+.result-text-block {
   line-height: 1.6;
   color: #e5e7eb;
-  margin: 0;
-  white-space: pre-wrap; /* Keeps Gemini's line breaks */
+  word-wrap: break-word;
+}
+.result-text-block p {
+  margin-bottom: 0.75rem;
+}
+.result-text-block p:last-child {
+  margin-bottom: 0;
+}
+.result-text-block strong { color: #fff; font-weight: 600; }
+.result-text-block ul, .result-text-block ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.result-text-block h1, .result-text-block h2, .result-text-block h3 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: #fff;
+  font-weight: 600;
+  font-size: 1.1rem;
 }
 
 /* ─── Responsive ────────────────────────────────────────────── */
