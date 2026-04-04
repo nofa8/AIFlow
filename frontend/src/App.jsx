@@ -126,9 +126,11 @@ export default function App() {
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <select value={type} onChange={e => setType(e.target.value)} id="task-type-select">
-              <option value="sentiment">Sentiment Analysis</option>
-              <option value="summarize">Text Summarization</option>
-              <option value="keywords">Keyword Extraction</option>
+              <option value="sentiment">Mock Sentiment</option>
+              <option value="summarize">Mock Summary</option>
+              <option value="keywords">Mock Keywords</option>
+              <option value="hf-sentiment">Real Sentiment (HuggingFace)</option>
+              <option value="gemini-chat">AI Chat (Gemini)</option>
             </select>
             <textarea
               id="task-input"
@@ -175,8 +177,13 @@ export default function App() {
                 </div>
                 <div className="task-input">{task.input}</div>
                 {task.result && (
-                  <div className="task-result">
-                    <pre>{JSON.stringify(task.result, null, 2)}</pre>
+                  <div className={`task-result ${task.result.provider === 'mock-fallback' ? 'fallback' : ''}`}>
+                    {task.result.provider && (
+                      <span className={`provider-badge ${task.result.provider}`}>
+                        {task.result.provider}
+                      </span>
+                    )}
+                    <pre>{JSON.stringify(task.result.data || task.result, null, 2)}</pre>
                   </div>
                 )}
                 <div className="task-meta">

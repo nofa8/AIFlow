@@ -103,7 +103,7 @@ app.post("/", upload.single("file"), async (req, res) => {
     const { type = "sentiment", input } = req.body;
 
     // ─── Input Validation ─────────────────────────────────────
-    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords"];
+    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat"];
     if (!ALLOWED_TYPES.includes(type)) {
       return res.status(400).json({ error: `Invalid task type. Allowed: ${ALLOWED_TYPES.join(", ")}` });
     }

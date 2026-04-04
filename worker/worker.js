@@ -43,40 +43,85 @@ async function connectRedis() {
   throw new Error("Could not connect to Redis");
 }
 
-// ─── AI Processing (simulated) ─────────────────────────────────
+const { hfSentiment, geminiChat } = require("./aiClients");
+
+// ─── AI Processing (Mocks & Fallbacks) ─────────────────────────
+
+function mockSentiment(input) {
+  const score = Math.random();
+  const label = score > 0.6 ? "positive" : score > 0.3 ? "neutral" : "negative";
+  return {
+    provider: "mock",
+    type: "sentiment",
+    data: { label, score: parseFloat(score.toFixed(3)), model: "aiflow-mock-sentiment-v1" }
+  };
+}
+
+function mockSummary(input) {
+  const words = input.split(/\s+/);
+  const summary = words.length > 10 ? words.slice(0, Math.ceil(words.length * 0.3)).join(" ") + "…" : input;
+  return {
+    provider: "mock",
+    type: "summarize",
+    data: { summary, original_length: words.length, model: "aiflow-mock-summarizer-v1" }
+  };
+}
+
+function mockKeywords(input) {
+  const words = input.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+  const freq = {};
+  words.forEach((w) => (freq[w] = (freq[w] || 0) + 1));
+  const keywords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([word, count]) => ({ word, count }));
+  return {
+    provider: "mock",
+    type: "keywords",
+    data: { keywords, model: "aiflow-mock-keywords-v1" }
+  };
+}
+
 async function processTask(type, input) {
-  // Simulate AI processing delay (1 – 3 seconds)
-  await new Promise((r) => setTimeout(r, 1000 + Math.random() * 2000));
+  // Simulate standard processing delay for mocks (1 – 3 seconds)
+  if (!type.startsWith("hf-") && !type.startsWith("gemini-")) {
+    await new Promise((r) => setTimeout(r, 1000 + Math.random() * 2000));
+  }
 
   switch (type) {
-    case "sentiment": {
-      const score = Math.random();
-      const label = score > 0.6 ? "positive" : score > 0.3 ? "neutral" : "negative";
-      return { label, score: parseFloat(score.toFixed(3)), model: "aiflow-sentiment-v1" };
-    }
+    case "sentiment":
+      return mockSentiment(input);
 
-    case "summarize": {
-      const words = input.split(/\s+/);
-      const summary =
-        words.length > 10
-          ? words.slice(0, Math.ceil(words.length * 0.3)).join(" ") + "…"
-          : input;
-      return { summary, original_length: words.length, model: "aiflow-summarizer-v1" };
-    }
+    case "summarize":
+      return mockSummary(input);
 
-    case "keywords": {
-      const words = input.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
-      const freq = {};
-      words.forEach((w) => (freq[w] = (freq[w] || 0) + 1));
-      const keywords = Object.entries(freq)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([word, count]) => ({ word, count }));
-      return { keywords, model: "aiflow-keywords-v1" };
-    }
+    case "keywords":
+      return mockKeywords(input);
+
+    case "hf-sentiment":
+      console.log(`[AI] Processing hf-sentiment with HuggingFace`);
+      try {
+        return await hfSentiment(input);
+      } catch (err) {
+        console.log(`[AI] Fallback triggered for hf-sentiment: ${err.message}`);
+        const fallback = mockSentiment(input);
+        fallback.provider = "mock-fallback";
+        return fallback;
+      }
+
+    case "gemini-chat":
+      console.log(`[AI] Processing gemini-chat with Gemini`);
+      try {
+        return await geminiChat(input);
+      } catch (err) {
+        console.log(`[AI] Fallback triggered for gemini-chat: ${err.message}`);
+        const fallback = mockSummary(input);
+        fallback.provider = "mock-fallback";
+        // Convert to chat format
+        fallback.type = "chat";
+        fallback.data = { text: "Fallback AI Response: " + fallback.data.summary };
+        return fallback;
+      }
 
     default:
-      return { echo: input, model: "aiflow-echo-v1" };
+      return { provider: "mock", type: "echo", data: { echo: input, model: "aiflow-echo-v1" } };
   }
 }
 

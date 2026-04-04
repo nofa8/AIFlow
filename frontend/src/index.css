@@ -341,7 +341,26 @@ body {
   background: var(--bg-input);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
+  position: relative;
 }
+
+.task-result.fallback {
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.provider-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+.provider-badge.huggingface { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+.provider-badge.gemini { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
+.provider-badge.mock-fallback { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); }
+.provider-badge.mock { background: rgba(139, 156, 199, 0.15); color: var(--text-secondary); }
 
 .task-result pre {
   font-size: 0.8rem;
