@@ -14,6 +14,10 @@ export default function App() {
   const wsRef = useRef(null)
   const toastId = useRef(0)
 
+  const isImageTask = type === 'gemini-image'
+  const isPdfTask = type === 'gemini-pdf'
+  const requiresFile = isImageTask || isPdfTask
+
   // ─── Toast helper ─────────────────────────────────────────
   const addToast = useCallback((message, error = false) => {
     const id = ++toastId.current
@@ -107,6 +111,90 @@ export default function App() {
     }
   }
 
+  // Add this function above your return()
+  const handleTypeChange = (e) => {
+    setType(e.target.value)
+    setFile(null) // Wipe the file if they change the task type
+    // We clear the file input element visually
+    if (document.getElementById('task-file')) {
+      document.getElementById('task-file').value = ''
+    }
+  }
+
+  // ─── Visual Result Renderer ─────────────────────────────────
+  const renderTaskResult = (task) => {
+    // 1. Real-time Loading States
+    if (task.status === 'pending') {
+      return (
+        <div className="status-indicator waiting">
+          <span className="spinner-small"></span> Waiting for worker...
+        </div>
+      )
+    }
+    
+    if (task.status === 'processing') {
+      return (
+        <div className="status-indicator processing">
+          <span className="pulse-dot"></span> 🤖 AI is analyzing...
+        </div>
+      )
+    }
+
+    if (task.status === 'failed') {
+      return <div className="error-text">❌ {task.result?.error || 'Task failed to process.'}</div>
+    }
+
+    // 2. Beautiful Result Parsing
+    const data = task.result?.data || task.result;
+    if (!data) return null;
+
+    switch (task.type) {
+      case 'sentiment':
+      case 'hf-sentiment':
+        const isPositive = data.label?.toLowerCase() === 'positive';
+        const scorePct = Math.round((data.score || 0) * 100);
+        return (
+          <div className="result-sentiment">
+            <span className={`sentiment-badge ${isPositive ? 'positive' : 'negative'}`}>
+              {data.label?.toUpperCase()}
+            </span>
+            <div className="confidence-bar-bg">
+              <div 
+                className={`confidence-bar-fill ${isPositive ? 'bg-green' : 'bg-red'}`} 
+                style={{ width: `${scorePct}%` }}
+              ></div>
+            </div>
+            <small>{scorePct}% Confidence</small>
+          </div>
+        );
+
+      case 'keywords':
+        return (
+          <div className="result-keywords">
+            {data.keywords?.map((kw, i) => (
+              <span key={i} className="keyword-tag">
+                {kw.word} <span className="kw-count">{kw.count}</span>
+              </span>
+            ))}
+          </div>
+        );
+
+      case 'gemini-image':
+      case 'gemini-pdf':
+      case 'gemini-chat':
+      case 'summarize':
+        return (
+          <div className="result-text-block">
+            <p>{data.text || data.summary || data.response}</p>
+          </div>
+        );
+
+      default:
+        // Safe fallback for anything unexpected
+        return <pre>{JSON.stringify(data, null, 2)}</pre>;
+    }
+  }
+
   // ─── Render ───────────────────────────────────────────────
   return (
     <div className="app">
@@ -125,32 +213,48 @@ export default function App() {
         <h2>New Task</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
-            <select value={type} onChange={e => setType(e.target.value)} id="task-type-select">
-              <option value="sentiment">Mock Sentiment</option>
-              <option value="summarize">Mock Summary</option>
-              <option value="keywords">Mock Keywords</option>
-              <option value="hf-sentiment">Real Sentiment (HuggingFace)</option>
-              <option value="gemini-chat">AI Chat (Gemini)</option>
-              <option value="gemini-image">Image Caption (Gemini)</option>
-              <option value="gemini-pdf">PDF Summary (Gemini)</option>
+            <select value={type} onChange={handleTypeChange} id="task-type-select">
+              <optgroup label="Simulated (Mocks)">
+                <option value="sentiment">Mock Sentiment</option>
+                <option value="summarize">Mock Summary</option>
+                <option value="keywords">Mock Keywords</option>
+              </optgroup>
+              <optgroup label="Real AI APIs">
+                <option value="hf-sentiment">Real Sentiment (HuggingFace)</option>
+                <option value="gemini-chat">AI Chat (Gemini)</option>
+                <option value="gemini-image">Image Caption (Gemini)</option>
+                <option value="gemini-pdf">PDF Summary (Gemini)</option>
+              </optgroup>
             </select>
             <textarea
               id="task-input"
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder="Enter text to analyze…"
+              placeholder={requiresFile ? "Optional instructions (e.g., 'Extract names')..." : "Enter text to analyze…"}
               rows={2}
             />
           </div>
           <div className="form-row">
-            <div className="file-input-wrapper">
-              <input
-                id="task-file"
-                type="file"
-                onChange={e => setFile(e.target.files[0] || null)}
-              />
-            </div>
-            <button className="btn-submit" type="submit" disabled={submitting || !input.trim()} id="submit-task-btn">
+            {requiresFile ? (
+              <div className="file-input-wrapper">
+                <input
+                  id="task-file"
+                  type="file"
+                  accept={isImageTask ? "image/*" : "application/pdf"}
+                  onChange={e => setFile(e.target.files[0] || null)}
+                />
+                <small style={{display: 'block', marginTop: '4px', color: '#888'}}>Max size: 5MB</small>
+              </div>
+            ) : (
+              <div className="spacer"></div> /* Empty div to keep flexbox layout aligned */
+            )}
+            
+            <button 
+              className="btn-submit" 
+              type="submit" 
+              disabled={submitting || (requiresFile ? !file : !input.trim())} 
+              id="submit-task-btn"
+            >
               {submitting ? 'Submitting…' : 'Submit Task'}
             </button>
           </div>
@@ -172,22 +276,39 @@ export default function App() {
         ) : (
           <div className="tasks-list">
             {tasks.map(task => (
-              <article className="task-card" key={task.id}>
+              <article className={`task-card ${task.status}`} key={task.id}>
                 <div className="task-card-top">
-                  <span className="task-type">{task.type}</span>
+                  <span className="task-type">
+                    {task.type === 'gemini-image' ? '🖼️ Image AI' : 
+                     task.type === 'gemini-pdf' ? '📄 PDF AI' : 
+                     task.type.includes('sentiment') ? '🎭 Sentiment' : 
+                     '💬 Text AI'}
+                  </span>
                   <span className={`task-status ${task.status}`}>{task.status}</span>
                 </div>
-                <div className="task-input">{task.input}</div>
-                {task.result && (
-                  <div className={`task-result ${task.result.provider === 'mock-fallback' ? 'fallback' : ''}`}>
-                    {task.result.provider && (
+                
+                <div className="task-input">
+                  {task.type.includes('gemini') && task.input === '' 
+                    ? <em>No text provided, only file analyzed.</em> 
+                    : task.input}
+                </div>
+
+                {/* --- NEW DYNAMIC RESULT AREA --- */}
+                <div className={`task-result-area ${task.status}`}>
+                  {task.result?.provider && task.status === 'completed' && (
+                    <div className="provider-wrapper">
                       <span className={`provider-badge ${task.result.provider}`}>
-                        {task.result.provider}
+                        {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
                       </span>
-                    )}
-                    <pre>{JSON.stringify(task.result.data || task.result, null, 2)}</pre>
+                    </div>
+                  )}
+                  
+                  <div className="parsed-result">
+                    {renderTaskResult(task)}
                   </div>
-                )}
+                </div>
+                {/* ------------------------------- */}
+
                 <div className="task-meta">
                   {task.id.slice(0, 8)}… · {new Date(task.created_at).toLocaleString()}
                 </div>

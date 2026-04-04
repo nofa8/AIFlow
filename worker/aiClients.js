@@ -1,7 +1,7 @@
 const axios = require("axios");
 const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
-const pdf = require("pdf-parse");
+const { PDFParse } = require("pdf-parse");
 
 // Check API keys on startup explicitly as requested
 if (!process.env.GEMINI_API_KEY) {
@@ -118,7 +118,13 @@ async function geminiPDF(filePath) {
   }
 
   const buffer = fs.readFileSync(filePath);
-  const data = await pdf(buffer);
+  const parser = new PDFParse({ data: buffer });
+  let data;
+  try {
+    data = await parser.getText();
+  } finally {
+    await parser.destroy();
+  }
 
   const text = data.text.slice(0, 3000);
 

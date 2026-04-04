@@ -99,7 +99,10 @@ app.get("/health", (_req, res) => {
 // Create task (sync REST → async queue)
 app.post("/", upload.single("file"), async (req, res) => {
   try {
-    const { type = "sentiment", input } = req.body;
+    const { type = "sentiment" } = req.body;
+    let input = req.body.input || "";
+    
+    const isMultimodal = type === "gemini-image" || type === "gemini-pdf";
 
     // ─── Input Validation ─────────────────────────────────────
     const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat", "gemini-image", "gemini-pdf"];
@@ -115,8 +118,8 @@ app.post("/", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "PDF file required for gemini-pdf task" });
     }
 
-    if (!input || typeof input !== "string" || !input.trim()) {
-      return res.status(400).json({ error: "input is required" });
+    if (!isMultimodal && (!input || typeof input !== "string" || !input.trim())) {
+      return res.status(400).json({ error: "input is required for text tasks" });
     }
 
     if (input.length > 5000) {
