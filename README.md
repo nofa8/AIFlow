@@ -82,8 +82,8 @@ Frontend → NGINX → API Gateway → Task Service → MinIO (object storage)
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/your-repo/aiflow.git](https://github.com/nofa8/AIFlow.git)
-cd aiflow
+git clone https://github.com/nofa8/AIFlow.git
+cd AIFlow
 
 # 2. Configure environment
 cp .env.example .env
