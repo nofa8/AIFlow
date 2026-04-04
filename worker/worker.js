@@ -43,7 +43,9 @@ async function connectRedis() {
   throw new Error("Could not connect to Redis");
 }
 
-const { hfSentiment, geminiChat } = require("./aiClients");
+const { hfSentiment, geminiChat, geminiImage, geminiPDF } = require("./aiClients");
+const { downloadFile } = require("./minioClient");
+const fs = require("fs");
 
 // ─── AI Processing (Mocks & Fallbacks) ─────────────────────────
 
@@ -79,7 +81,7 @@ function mockKeywords(input) {
   };
 }
 
-async function processTask(type, input) {
+async function processTask(type, input, objectName, mimeType) {
   // Simulate standard processing delay for mocks (1 – 3 seconds)
   if (!type.startsWith("hf-") && !type.startsWith("gemini-")) {
     await new Promise((r) => setTimeout(r, 1000 + Math.random() * 2000));
@@ -118,6 +120,44 @@ async function processTask(type, input) {
         fallback.type = "chat";
         fallback.data = { text: "Fallback AI Response: " + fallback.data.summary };
         return fallback;
+      }
+
+    case "gemini-image":
+      console.log(`[AI] Processing gemini-image with Gemini`);
+      let localImageFile;
+      try {
+        localImageFile = await downloadFile(objectName);
+        return await geminiImage(localImageFile, mimeType);
+      } catch (err) {
+        console.warn(`[AI] Image processing failed: ${err.message}`);
+        return {
+          provider: "mock-fallback",
+          type: "image-caption",
+          data: { text: "Fallback: Could not process image." }
+        };
+      } finally {
+        if (localImageFile && fs.existsSync(localImageFile)) {
+          fs.unlinkSync(localImageFile);
+        }
+      }
+
+    case "gemini-pdf":
+      console.log(`[AI] Processing gemini-pdf with Gemini`);
+      let localPdfFile;
+      try {
+        localPdfFile = await downloadFile(objectName);
+        return await geminiPDF(localPdfFile);
+      } catch (err) {
+        console.warn(`[AI] PDF processing failed: ${err.message}`);
+        return {
+          provider: "mock-fallback",
+          type: "pdf-summary",
+          data: { text: "Fallback: Could not process PDF." }
+        };
+      } finally {
+        if (localPdfFile && fs.existsSync(localPdfFile)) {
+          fs.unlinkSync(localPdfFile);
+        }
       }
 
     default:
@@ -160,7 +200,7 @@ async function start() {
 
     const taskMessage = JSON.parse(msg.content.toString());
     const { taskId, type, payload } = taskMessage;
-    const input = payload.input;
+    const { input, objectName, mimeType } = payload;
 
     console.log(`[Worker] Processing task ${taskId} (${type})`);
 
@@ -176,7 +216,7 @@ async function start() {
       channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(startEvent)), { persistent: true });
 
       // Run AI
-      const result = await processTask(type, input);
+      const result = await processTask(type, input, objectName, mimeType);
 
       // Mark as completed
       await pool.query(

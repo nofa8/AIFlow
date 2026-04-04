@@ -12,14 +12,13 @@ app.use(express.json());
 
 const PORT = process.env.TASK_SERVICE_PORT || 3001;
 
-// ─── File Upload (Docker Volume) ────────────────────────────────
-const storage = multer.diskStorage({
-  destination: "/app/uploads",
-  filename: (_req, file, cb) => {
-    cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
-  },
+// ─── File Upload (Memory Storage for MinIO) ─────────────────────
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+
+const { uploadFile } = require("./minioClient");
 
 // ─── PostgreSQL ─────────────────────────────────────────────────
 const pool = new Pool({
@@ -103,9 +102,17 @@ app.post("/", upload.single("file"), async (req, res) => {
     const { type = "sentiment", input } = req.body;
 
     // ─── Input Validation ─────────────────────────────────────
-    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat"];
+    const ALLOWED_TYPES = ["sentiment", "summarize", "keywords", "hf-sentiment", "gemini-chat", "gemini-image", "gemini-pdf"];
     if (!ALLOWED_TYPES.includes(type)) {
       return res.status(400).json({ error: `Invalid task type. Allowed: ${ALLOWED_TYPES.join(", ")}` });
+    }
+
+    if (type === "gemini-image" && (!req.file || !req.file.mimetype.startsWith("image/"))) {
+      return res.status(400).json({ error: "Image file required for gemini-image task" });
+    }
+
+    if (type === "gemini-pdf" && (!req.file || req.file.mimetype !== "application/pdf")) {
+      return res.status(400).json({ error: "PDF file required for gemini-pdf task" });
     }
 
     if (!input || typeof input !== "string" || !input.trim()) {
@@ -116,7 +123,13 @@ app.post("/", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "input exceeds maximum length of 5000 characters" });
     }
 
-    const filePath = req.file ? req.file.filename : null;
+    let fileData = null;
+    if (req.file) {
+      fileData = await uploadFile(req.file);
+    }
+
+    // fallback file_path logging to objectName
+    const filePath = fileData ? fileData.objectName : null;
 
     const result = await pool.query(
       `INSERT INTO tasks (type, input, status, file_path)
@@ -132,7 +145,7 @@ app.post("/", upload.single("file"), async (req, res) => {
     const { TASK_QUEUED } = require("./shared/events");
 
     // Publish to queue for async processing
-    const taskMessage = createTaskMessage(task.id, task.type, task.input);
+    const taskMessage = createTaskMessage(task.id, task.type, task.input, fileData?.objectName || null, fileData?.mimeType || null);
     channel.sendToQueue(TASK_QUEUE, Buffer.from(JSON.stringify(taskMessage)), { persistent: true });
 
     // Publish realtime event

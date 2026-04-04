@@ -1,5 +1,7 @@
 const axios = require("axios");
 const { GoogleGenAI } = require("@google/genai");
+const fs = require("fs");
+const pdf = require("pdf-parse");
 
 // Check API keys on startup explicitly as requested
 if (!process.env.GEMINI_API_KEY) {
@@ -78,7 +80,63 @@ async function geminiChat(input) {
   throw lastError;
 }
 
+async function geminiImage(filePath, mimeType) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Missing Gemini API key");
+  }
+
+  const buffer = fs.readFileSync(filePath);
+
+  const res = await gemini.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: "Describe this image accurately and concisely." },
+          {
+            inlineData: {
+              mimeType: mimeType || "image/png",
+              data: buffer.toString("base64")
+            }
+          }
+        ]
+      }
+    ]
+  });
+
+  return {
+    provider: "gemini",
+    type: "image-caption",
+    data: { text: res.text }
+  };
+}
+
+async function geminiPDF(filePath) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Missing Gemini API key");
+  }
+
+  const buffer = fs.readFileSync(filePath);
+  const data = await pdf(buffer);
+
+  const text = data.text.slice(0, 3000);
+
+  const res = await gemini.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: `Summarize this document:\n${text}`
+  });
+
+  return {
+    provider: "gemini",
+    type: "pdf-summary",
+    data: { text: res.text }
+  };
+}
+
 module.exports = {
   hfSentiment,
   geminiChat,
+  geminiImage,
+  geminiPDF
 };

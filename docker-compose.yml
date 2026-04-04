@@ -4,7 +4,7 @@ networks:
 
 volumes:
   postgres_data:
-  uploads_data:
+  minio_data:
   redis_data:
 
 services:
@@ -55,6 +55,27 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: aiflow_minio
+    restart: on-failure
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - aiflow-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # ─── 2. Backend Services ────────────────────────────────────────
 
   task-service:
@@ -64,14 +85,14 @@ services:
     env_file: .env
     networks:
       - aiflow-net
-    volumes:
-      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
@@ -110,6 +131,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4002/ || exit 1"]

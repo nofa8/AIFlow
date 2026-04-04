@@ -131,6 +131,8 @@ export default function App() {
               <option value="keywords">Mock Keywords</option>
               <option value="hf-sentiment">Real Sentiment (HuggingFace)</option>
               <option value="gemini-chat">AI Chat (Gemini)</option>
+              <option value="gemini-image">Image Caption (Gemini)</option>
+              <option value="gemini-pdf">PDF Summary (Gemini)</option>
             </select>
             <textarea
               id="task-input"

@@ -1,9 +1,9 @@
 module.exports = {
   // Base task structure sent to ai_tasks queue
-  createTaskMessage: (taskId, type, input) => ({
+  createTaskMessage: (taskId, type, input, objectName = null, mimeType = null) => ({
     taskId,
     type,
-    payload: { input },
+    payload: { input, objectName, mimeType },
     timestamp: new Date().toISOString()
   }),
 
