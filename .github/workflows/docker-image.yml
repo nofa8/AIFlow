@@ -42,7 +42,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.SIM }} 
+          password: ${{ secrets.SIM }} # Supposedly the GITHUB_TOKEN can be used here, but it doesn't have enough permissions to push to the registry, so we use a PAT instead :/
 
       - name: Extract Docker metadata
         id: meta
