@@ -32,6 +32,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ─── 1. SET UP QEMU AND BUILDX ────────────────────────────────
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # ──────────────────────────────────────────────────────────────
+
       # Docker strictly requires repository names to be lowercase
       - name: Set lower case repository name
         run: |
@@ -42,7 +50,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.SIM }} # Supposedly the GITHUB_TOKEN can be used here, but it doesn't have enough permissions to push to the registry, so we use a PAT instead :/
+          password: ${{ secrets.SIM }} # Using PAT due to repo permission restrictions
 
       - name: Extract Docker metadata
         id: meta
@@ -57,7 +65,9 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./${{ matrix.service }}
-          # Only push to the registry if it's a push to main (don't push on PRs)
+          # Only push to the registry if it's a push to main
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # ─── 2. SPECIFY PLATFORMS ───────────────────────────────────
+          platforms: linux/amd64,linux/arm64
