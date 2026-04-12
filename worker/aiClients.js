@@ -1,5 +1,6 @@
 const axios = require("axios");
 const { GoogleGenAI } = require("@google/genai");
+const { HfInference, InferenceClient } = require("@huggingface/inference");
 const fs = require("fs");
 const { PDFParse } = require("pdf-parse");
 const cheerio = require("cheerio");
@@ -16,6 +17,9 @@ const gemini = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || "missing_key",
 });
 
+const ClientClass = InferenceClient || HfInference;
+const hfClient = new ClientClass(process.env.HUGGINGFACE_API_KEY || "missing_key");
+
 async function hfSentiment(input) {
   if (!process.env.HUGGINGFACE_API_KEY) {
     throw new Error("Missing HF API key");
@@ -25,22 +29,17 @@ async function hfSentiment(input) {
   // 2 attempts retry block
   for (let i = 0; i < 2; i++) {
     try {
-      const res = await axios.post(
-        "https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english",
-        { inputs: input },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          },
-          timeout: 5000,
-        }
-      );
+      const output = await hfClient.textClassification({
+        model: "distilbert-base-uncased-finetuned-sst-2-english",
+        inputs: input,
+      });
 
       // Unified Schema
+      const best = Array.isArray(output) ? output.sort((a,b) => b.score - a.score)[0] : output;
       return {
         provider: "huggingface",
         type: "sentiment",
-        data: res.data[0],
+        data: best,
       };
     } catch (err) {
       lastError = err;

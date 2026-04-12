@@ -24,8 +24,16 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB,
 });
 
+pool.on("error", (err) => {
+  console.error("[Worker] Unexpected PostgreSQL error on idle client:", err.message);
+});
+
 // ─── Redis (Cache Invalidation) ────────────────────────────────
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+
+redisClient.on("error", (err) => {
+  console.error("[Worker] Redis Error:", err.message);
+});
 
 async function connectRedis() {
   let retries = 10;
@@ -184,7 +192,13 @@ async function connectRabbitMQ() {
   while (retries) {
     try {
       const conn = await amqp.connect(`amqp://${process.env.RABBITMQ_HOST}`);
+      conn.on("error", (err) => console.error("[Worker] RabbitMQ Connection Error:", err.message));
+      conn.on("close", () => console.error("[Worker] RabbitMQ Connection Closed"));
+      
       const channel = await conn.createChannel();
+      channel.on("error", (err) => console.error("[Worker] RabbitMQ Channel Error:", err.message));
+      channel.on("close", () => console.error("[Worker] RabbitMQ Channel Closed"));
+      
       await channel.assertQueue(TASK_QUEUE, { durable: true });
       await channel.assertQueue(REALTIME_QUEUE, { durable: true });
       console.log("[Worker] RabbitMQ connected");
@@ -225,8 +239,12 @@ async function start() {
       );
 
       // Notify realtime service: TASK_STARTED
-      const startEvent = createEventMessage(taskId, TASK_STARTED, { type });
-      channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(startEvent)), { persistent: true });
+      try {
+        const startEvent = createEventMessage(taskId, TASK_STARTED, { type });
+        channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(startEvent)), { persistent: true });
+      } catch (e) {
+        console.warn(`[Worker] Could not send TASK_STARTED for ${taskId}:`, e.message);
+      }
 
       // Run AI
       const result = await processTask(type, input, objectName, mimeType);
@@ -238,31 +256,55 @@ async function start() {
       );
 
       // Invalidate Redis cache so next read gets fresh data
-      await redisClient.del(`task:${taskId}`);
+      try {
+        if (redisClient.isReady) {
+          await redisClient.del(`task:${taskId}`);
+        }
+      } catch (redisErr) {
+        console.warn(`[Worker] Redis DEL failed, caching is inoperational: ${redisErr.message}`);
+      }
 
       console.log(`[Worker] Task ${taskId} completed (cache invalidated)`);
 
       // Notify realtime service: TASK_COMPLETED
-      const completeEvent = createEventMessage(taskId, TASK_COMPLETED, result);
-      channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(completeEvent)), { persistent: true });
+      try {
+        const completeEvent = createEventMessage(taskId, TASK_COMPLETED, result);
+        channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(completeEvent)), { persistent: true });
+      } catch (e) {
+        console.warn(`[Worker] Could not send TASK_COMPLETED for ${taskId}:`, e.message);
+      }
 
       channel.ack(msg);
     } catch (err) {
       console.error(`[Worker] Task ${taskId} failed:`, err.message);
 
-      await pool.query(
-        "UPDATE tasks SET status = 'failed', result = $1, updated_at = NOW() WHERE id = $2",
-        [JSON.stringify({ error: err.message }), taskId]
-      );
+      try {
+        await pool.query(
+          "UPDATE tasks SET status = 'failed', result = $1, updated_at = NOW() WHERE id = $2",
+          [JSON.stringify({ error: err.message }), taskId]
+        );
 
-      // Invalidate Redis cache on failure too
-      await redisClient.del(`task:${taskId}`);
+        // Invalidate Redis cache on failure too
+        try {
+          if (redisClient.isReady) {
+            await redisClient.del(`task:${taskId}`);
+          }
+        } catch (redisErr) {
+          console.warn(`[Worker] Redis DEL failed: ${redisErr.message}`);
+        }
 
-      // Notify realtime service: TASK_FAILED
-      const failEvent = createEventMessage(taskId, TASK_FAILED, null, err.message);
-      channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(failEvent)), { persistent: true });
-
-      channel.ack(msg);
+        // Notify realtime service: TASK_FAILED
+        try {
+          const failEvent = createEventMessage(taskId, TASK_FAILED, null, err.message);
+          channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(failEvent)), { persistent: true });
+        } catch (e) {
+          console.warn(`[Worker] Could not send TASK_FAILED for ${taskId}:`, e.message);
+        }
+      } catch (fallbackErr) {
+         console.error(`[Worker] Failed to record failure for task ${taskId}:`, fallbackErr.message);
+      } finally {
+         channel.ack(msg);
+      }
     }
   });
 }
