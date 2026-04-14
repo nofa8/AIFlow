@@ -13,6 +13,10 @@ const { createProxyMiddleware } = require("http-proxy-middleware");
 const taskServiceProxy = createProxyMiddleware({
   target: `http://aiflow_task_service:${process.env.TASK_SERVICE_PORT || 3001}`,
   changeOrigin: true,
+  onError: (err, req, res) => {
+    console.error("[API Gateway] Proxy Error:", err.message);
+    res.status(503).json({ error: "Task service is temporarily unavailable. Please try again later." });
+  }
 });
 
 app.use('/tasks', taskServiceProxy);

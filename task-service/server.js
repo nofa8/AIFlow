@@ -29,6 +29,10 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB,
 });
 
+pool.on("error", (err) => {
+  console.error("[Task Service] Unexpected PostgreSQL error on idle client:", err.message);
+});
+
 async function connectDB() {
   let retries = 10;
   while (retries) {
@@ -55,7 +59,13 @@ async function connectRabbitMQ() {
   while (retries) {
     try {
       const conn = await amqp.connect(`amqp://${process.env.RABBITMQ_HOST}`);
+      conn.on("error", (err) => console.error("[Task Service] RabbitMQ Connection Error:", err.message));
+      conn.on("close", () => console.error("[Task Service] RabbitMQ Connection Closed"));
+      
       channel = await conn.createChannel();
+      channel.on("error", (err) => console.error("[Task Service] RabbitMQ Channel Error:", err.message));
+      channel.on("close", () => console.error("[Task Service] RabbitMQ Channel Closed"));
+      
       await channel.assertQueue(TASK_QUEUE, { durable: true });
       await channel.assertQueue(REALTIME_QUEUE, { durable: true });
       console.log("[Task Service] RabbitMQ connected");
@@ -71,6 +81,10 @@ async function connectRabbitMQ() {
 
 // ─── Redis (Caching) ───────────────────────────────────────────
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+
+redisClient.on("error", (err) => {
+  console.error("[Task Service] Redis Error:", err.message);
+});
 
 async function connectRedis() {
   let retries = 10;
@@ -159,7 +173,7 @@ app.post("/", upload.single("file"), async (req, res) => {
     res.status(201).json(task);
   } catch (err) {
     console.error("[Task Service] Error creating task:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(503).json({ error: "Service temporarily unavailable due to infrastructure failure. Please try again later." });
   }
 });
 
@@ -172,7 +186,7 @@ app.get("/", async (_req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("[Task Service] Error listing tasks:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(503).json({ error: "Tasks temporarily unavailable due to database connection issue." });
   }
 });
 
@@ -182,10 +196,17 @@ app.get("/:id", async (req, res) => {
 
   try {
     // 1. Check Cache
-    const cachedTask = await redisClient.get(`task:${id}`);
-    if (cachedTask) {
-      console.log(`[Task Service] Cache hit for task ${id}`);
-      return res.json({ source: "redis", data: JSON.parse(cachedTask) });
+    try {
+      if (redisClient.isReady) {
+        const cachedTask = await redisClient.get(`task:${id}`);
+        if (cachedTask) {
+          console.log(`[Task Service] Cache hit for task ${id}`);
+          return res.json({ source: "redis", data: JSON.parse(cachedTask) });
+        }
+      }
+    } catch (redisErr) {
+      console.warn(`[Task Service] Redis GET failed, caching is inoperational: ${redisErr.message}`);
+      // Fallback to database if Redis fails
     }
 
     // 2. Cache Miss -> Query DB
@@ -198,12 +219,18 @@ app.get("/:id", async (req, res) => {
     const task = result.rows[0];
 
     // 3. Save to Cache for 60 seconds
-    await redisClient.setEx(`task:${id}`, 60, JSON.stringify(task));
+    try {
+      if (redisClient.isReady) {
+        await redisClient.setEx(`task:${id}`, 60, JSON.stringify(task));
+      }
+    } catch (redisErr) {
+      console.warn(`[Task Service] Redis SET failed, caching is inoperational: ${redisErr.message}`);
+    }
 
     res.json({ source: "postgres", data: task });
   } catch (err) {
     console.error("[Task Service] Error fetching task:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(503).json({ error: "Service temporarily unavailable due to database connection issue." });
   }
 });
 

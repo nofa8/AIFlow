@@ -12,6 +12,7 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false)
   const [wsStatus, setWsStatus] = useState('disconnected')
   const [toasts, setToasts] = useState([])
+  const [systemError, setSystemError] = useState(null)
   const wsRef = useRef(null)
   const toastId = useRef(0)
 
@@ -32,9 +33,19 @@ export default function App() {
       const res = await fetch(`${API_BASE}/tasks`)
       if (res.ok) {
         const data = await res.json()
-        setTasks(data)
+        if (data.error) {
+          setSystemError(data.error)
+          setTasks([])
+        } else {
+          setSystemError(null)
+          setTasks(data)
+        }
+      } else {
+        const err = await res.json()
+        setSystemError(err.error || 'System is currently unavailable.')
       }
     } catch (err) {
+      setSystemError('Could not contact the server infrastructure.')
       console.error('Failed to fetch tasks:', err)
     }
   }, [])
@@ -97,15 +108,19 @@ export default function App() {
 
       if (res.ok) {
         const task = await res.json()
+        setSystemError(null)
         setTasks(prev => [task, ...prev])
         setInput('')
         setFile(null)
         addToast(`Task ${task.id.slice(0, 8)}… queued`)
       } else {
         const err = await res.json()
-        addToast(err.error || 'Failed to create task', true)
+        const errMsg = err.error || 'Failed to create task'
+        setSystemError(errMsg)
+        addToast(errMsg, true)
       }
     } catch (err) {
+      setSystemError('Network error connecting to API.')
       addToast('Network error', true)
     } finally {
       setSubmitting(false)
@@ -210,6 +225,18 @@ export default function App() {
         </div>
       </header>
 
+      {/* System Error Banner */}
+      {systemError && (
+        <div className="system-error-banner">
+          <div className="banner-icon">🚨</div>
+          <div className="banner-content">
+            <h3>System Offline</h3>
+            <p>{systemError}</p>
+          </div>
+          <button className="btn-retry" onClick={fetchTasks}>Retry Connection</button>
+        </div>
+      )}
+
       {/* Create Task */}
       <section className="create-task">
         <h2>New Task</h2>
@@ -255,7 +282,7 @@ export default function App() {
             <button 
               className="btn-submit" 
               type="submit" 
-              disabled={submitting || (requiresFile ? !file : !input.trim())} 
+              disabled={submitting || !!systemError || (requiresFile ? !file : !input.trim())} 
               id="submit-task-btn"
             >
               {submitting ? 'Submitting…' : 'Submit Task'}
@@ -271,7 +298,12 @@ export default function App() {
           <span className="task-count">{tasks.length} total</span>
         </div>
 
-        {tasks.length === 0 ? (
+        {systemError ? (
+          <div className="empty-state error">
+            <div className="icon" style={{ opacity: 0.8 }}>🔌</div>
+            <p>Tasks cannot be loaded right now due to a system issue.</p>
+          </div>
+        ) : tasks.length === 0 ? (
           <div className="empty-state">
             <div className="icon">📭</div>
             <p>No tasks yet — submit one above to get started.</p>
