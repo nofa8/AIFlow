@@ -12,8 +12,8 @@ All services rely on the `.env` file at the root. Key variables include:
 | `RABBITMQ_HOST` | Hostname for the broker | `rabbitmq` |
 | `REDIS_URL` | Redis connection string | `redis://redis:6379` |
 | `MINIO_ENDPOINT` | MinIO Cloud service endpoint | `minio` |
-| `MINIO_ACCESS_KEY` | Root MinIO Access credential | `minioadmin` |
-| `MINIO_SECRET_KEY` | Root MinIO Secret credential | `minioadmin` |
+| `MINIO_ROOT_USER` | Root MinIO Access credential | `minioadmin` |
+| `MINIO_ROOT_PASSWORD` | Root MinIO Secret credential | `minioadmin` |
 | `GEMINI_API_KEY` | Secure Auth Key for LLMs | `...` |
 
 ## Service Orchestration

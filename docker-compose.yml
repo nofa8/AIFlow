@@ -191,3 +191,17 @@ services:
         condition: service_healthy
       realtime-service:
         condition: service_healthy
+
+  tunnel:
+    container_name: aiflow_tunnel
+    image: cloudflare/cloudflared:latest
+    restart: on-failure
+    environment:
+     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    #command: tunnel --no-autoupdate --url http://aiflow_nginx:80
+    networks:
+      - aiflow-net
+    depends_on:
+      nginx:
+        condition: service_started

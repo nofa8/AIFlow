@@ -35,7 +35,6 @@ export default function App() {
         const data = await res.json()
         if (data.error) {
           setSystemError(data.error)
-          setTasks([])
         } else {
           setSystemError(null)
           setTasks(data)
@@ -298,7 +297,7 @@ export default function App() {
           <span className="task-count">{tasks.length} total</span>
         </div>
 
-        {systemError ? (
+        {tasks.length === 0 && systemError ? (
           <div className="empty-state error">
             <div className="icon" style={{ opacity: 0.8 }}>🔌</div>
             <p>Tasks cannot be loaded right now due to a system issue.</p>
