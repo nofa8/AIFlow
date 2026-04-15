@@ -103,6 +103,7 @@ services:
     build: ./task-service
     container_name: aiflow_task_service
     restart: on-failure
+    stop_grace_period: 10s
     env_file: .env
     networks:
       - aiflow-net
@@ -143,6 +144,7 @@ services:
     build: ./worker
     container_name: aiflow_worker
     restart: on-failure
+    stop_grace_period: 30s
     env_file: .env
     networks:
       - aiflow-net
@@ -162,12 +164,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   realtime-service:
     build: ./realtime-service
     container_name: aiflow_realtime_service
     restart: on-failure
+    stop_grace_period: 10s
     env_file: .env
     networks:
       - aiflow-net
@@ -179,7 +182,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   # ─── 3. Frontend ────────────────────────────────────────────────
 

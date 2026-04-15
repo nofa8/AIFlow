@@ -46,11 +46,17 @@ async function connectRabbitMQ() {
     try {
       const conn = await amqp.connect(`amqp://${process.env.RABBITMQ_HOST}`);
       conn.on("error", (err) => console.error("[Realtime] RabbitMQ Connection Error:", err.message));
-      conn.on("close", () => console.error("[Realtime] RabbitMQ Connection Closed"));
+      conn.on("close", () => {
+        console.error("[Realtime] RabbitMQ connection lost. Exiting for restart…");
+        process.exit(1);
+      });
       
       const channel = await conn.createChannel();
       channel.on("error", (err) => console.error("[Realtime] RabbitMQ Channel Error:", err.message));
-      channel.on("close", () => console.error("[Realtime] RabbitMQ Channel Closed"));
+      channel.on("close", () => {
+        console.error("[Realtime] RabbitMQ channel closed. Exiting for restart…");
+        process.exit(1);
+      });
       
       await channel.assertQueue(REALTIME_QUEUE, { durable: true });
       console.log("[Realtime] RabbitMQ connected");

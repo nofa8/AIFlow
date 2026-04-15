@@ -88,11 +88,19 @@ async function connectRabbitMQ() {
     try {
       const conn = await amqp.connect(`amqp://${process.env.RABBITMQ_HOST}`);
       conn.on("error", (err) => console.error("[Task Service] RabbitMQ Connection Error:", err.message));
-      conn.on("close", () => console.error("[Task Service] RabbitMQ Connection Closed"));
+      conn.on("close", () => {
+        console.error("[Task Service] RabbitMQ connection lost. Exiting for restart…");
+        channel = null;
+        process.exit(1);
+      });
       
       channel = await conn.createChannel();
       channel.on("error", (err) => console.error("[Task Service] RabbitMQ Channel Error:", err.message));
-      channel.on("close", () => console.error("[Task Service] RabbitMQ Channel Closed"));
+      channel.on("close", () => {
+        console.error("[Task Service] RabbitMQ channel closed. Exiting for restart…");
+        channel = null;
+        process.exit(1);
+      });
       
       await channel.assertQueue(TASK_QUEUE, {
         durable: true,
@@ -222,6 +230,12 @@ app.post("/", upload.single("file"), async (req, res) => {
     let fileData = null;
     if (req.file) {
       fileData = await uploadFile(req.file);
+    }
+
+    // ─── Channel Guard: prevent orphaned DB rows ─────────────
+    if (!channel) {
+      end({ status: 503 });
+      return res.status(503).json({ error: "Message broker unavailable. Please retry shortly." });
     }
 
     // fallback file_path logging to objectName
