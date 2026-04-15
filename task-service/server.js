@@ -194,11 +194,10 @@ app.post("/", upload.single("file"), async (req, res) => {
             end({ status: 200 });
             const parsedCached = JSON.parse(cached);
             const cachedResultData = parsedCached.result;
-            console.log(cachedResultData);
-            // 🔥 THE TRICK: Create a Virtual Task record
+            // 🔥 Create a Virtual Task record with is_cache_hit = TRUE
             const inserted = await pool.query(
-              `INSERT INTO tasks (type, input, status, result)
-               VALUES ($1, $2, 'completed', $3::jsonb)
+              `INSERT INTO tasks (type, input, status, result, is_cache_hit)
+               VALUES ($1, $2, 'completed', $3::jsonb, TRUE)
                RETURNING *`,
               [type, input.trim(), JSON.stringify(cachedResultData)]
             );
@@ -211,11 +210,8 @@ app.post("/", upload.single("file"), async (req, res) => {
             // Notify Realtime service so other open tabs/windows see the updated event stream
             const eventMessage = createEventMessage(virtualTask.id, TASK_COMPLETED, cachedResultData);
             channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(eventMessage)), { persistent: true });
-            console.log(`[Task Service] Dedup hit for ${type}:${inputHash.slice(0, 8)}`);
-            return res.status(200).json({ 
-              ...virtualTask, 
-              cache_hit: true 
-            });
+            console.log(`[Task Service] Cache hit for ${type}:${inputHash.slice(0, 8)}`);
+            return res.status(200).json(virtualTask);
           }
         }
       } catch (dedupErr) {
@@ -232,8 +228,8 @@ app.post("/", upload.single("file"), async (req, res) => {
     const filePath = fileData ? fileData.objectName : null;
 
     const result = await pool.query(
-      `INSERT INTO tasks (type, input, status, file_path)
-       VALUES ($1, $2, 'queued', $3)
+      `INSERT INTO tasks (type, input, status, file_path, is_cache_hit)
+       VALUES ($1, $2, 'queued', $3, FALSE)
        RETURNING *`,
       [type, input, filePath]
     );

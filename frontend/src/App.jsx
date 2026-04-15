@@ -130,7 +130,7 @@ export default function App() {
         const taskData = await res.json()
         setSystemError(null)
         
-        if (taskData.cache_hit === true || taskData.status === "completed") {
+        if (taskData.is_cache_hit === true || taskData.status === "completed") {
           addToast(`⚡ Cached result returned instantly`)
           setTasks(prev => {
             const updated = prev.map(t => 
@@ -398,7 +398,7 @@ export default function App() {
                           {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
                         </span>
                       )}
-                      {task.cache_hit && (
+                      {task.is_cache_hit && (
                         <span className="provider-badge cached">⚡ CACHED</span>
                       )}
                     </div>
