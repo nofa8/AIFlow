@@ -33,8 +33,11 @@ services:
     restart: on-failure
     networks:
       - aiflow-net
+    command: >
+      bash -c "rabbitmq-plugins enable --offline rabbitmq_prometheus && rabbitmq-server"
     ports:
-      - "15672:15672" # Management UI
+      - "15672:15672"
+      - "15692:15692"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -192,16 +195,48 @@ services:
       realtime-service:
         condition: service_healthy
 
-  tunnel:
-    container_name: aiflow_tunnel
-    image: cloudflare/cloudflared:latest
+  # tunnel:
+  #   container_name: aiflow_tunnel
+  #   image: cloudflare/cloudflared:latest
+  #   restart: on-failure
+  #   environment:
+  #    - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+  #   command: tunnel --no-autoupdate run
+  #   #command: tunnel --no-autoupdate --url http://aiflow_nginx:80
+  #   networks:
+  #     - aiflow-net
+  #   depends_on:
+  #     nginx:
+  #       condition: service_started
+
+  # ─── 6. Observability ───────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: aiflow_prometheus
     restart: on-failure
-    environment:
-     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    command: tunnel --no-autoupdate run
-    #command: tunnel --no-autoupdate --url http://aiflow_nginx:80
     networks:
       - aiflow-net
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+    ports:
+      - "9090:9090"
     depends_on:
-      nginx:
-        condition: service_started
+      task-service:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: aiflow_grafana
+    env_file: .env
+    restart: on-failure
+    networks:
+      - aiflow-net
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro,z
+    ports:
+      - "3002:3000" 
+    depends_on:
+      - prometheus

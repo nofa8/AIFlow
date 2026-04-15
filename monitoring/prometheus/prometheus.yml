@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: 'task-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['aiflow_task_service:3001']
+
+  - job_name: 'worker'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['aiflow_worker:4002']
+
+  - job_name: 'rabbitmq'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['aiflow_rabbitmq:15692']

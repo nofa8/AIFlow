@@ -5,12 +5,40 @@ const multer = require("multer");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const redis = require("redis");
+const client = require("prom-client");
+const crypto = require("crypto");
 
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.TASK_SERVICE_PORT || 3001;
+
+// ─── Prometheus Metrics ─────────────────────────────────────────
+client.collectDefaultMetrics();
+
+const tasksCreated = new client.Counter({
+  name: 'aiflow_tasks_created_total',
+  help: 'Total tasks created',
+  labelNames: ['type']
+});
+
+const httpDuration = new client.Histogram({
+  name: 'aiflow_http_request_duration_seconds',
+  help: 'HTTP request duration in seconds',
+  labelNames: ['method', 'route', 'status'],
+  buckets: [0.01, 0.05, 0.1, 0.5, 1, 2, 5]
+});
+
+const cacheHits = new client.Counter({
+  name: 'aiflow_cache_hits_total',
+  help: 'Redis cache hits'
+});
+
+const cacheMisses = new client.Counter({
+  name: 'aiflow_cache_misses_total',
+  help: 'Redis cache misses'
+});
 
 // ─── File Upload (Memory Storage for MinIO) ─────────────────────
 const upload = multer({
@@ -52,7 +80,7 @@ async function connectDB() {
 // ─── RabbitMQ ───────────────────────────────────────────────────
 let channel = null;
 
-const { TASK_QUEUE, REALTIME_QUEUE } = require("./shared/queues");
+const { TASK_QUEUE, REALTIME_QUEUE, TASK_DLQ } = require("./shared/queues");
 
 async function connectRabbitMQ() {
   let retries = 10;
@@ -66,7 +94,14 @@ async function connectRabbitMQ() {
       channel.on("error", (err) => console.error("[Task Service] RabbitMQ Channel Error:", err.message));
       channel.on("close", () => console.error("[Task Service] RabbitMQ Channel Closed"));
       
-      await channel.assertQueue(TASK_QUEUE, { durable: true });
+      await channel.assertQueue(TASK_QUEUE, {
+        durable: true,
+        arguments: {
+          'x-dead-letter-exchange': '',
+          'x-dead-letter-routing-key': TASK_DLQ
+        }
+      });
+      await channel.assertQueue(TASK_DLQ, { durable: true });
       await channel.assertQueue(REALTIME_QUEUE, { durable: true });
       console.log("[Task Service] RabbitMQ connected");
       return;
@@ -110,8 +145,15 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "task-service" });
 });
 
+// Prometheus metrics endpoint
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", client.register.contentType);
+  res.end(await client.register.metrics());
+});
+
 // Create task (sync REST → async queue)
 app.post("/", upload.single("file"), async (req, res) => {
+  const end = httpDuration.startTimer({ method: 'POST', route: '/tasks' });
   try {
     const { type = "sentiment" } = req.body;
     let input = req.body.input || "";
@@ -138,6 +180,24 @@ app.post("/", upload.single("file"), async (req, res) => {
 
     if (input.length > 5000) {
       return res.status(400).json({ error: "input exceeds maximum length of 5000 characters" });
+    }
+
+    // ─── Dedup Cache Check (text tasks only) ──────────────────
+    if (!isMultimodal && input.trim()) {
+      try {
+        if (redisClient.isReady) {
+          const inputHash = crypto.createHash('sha256').update(`${type}:${input.trim()}`).digest('hex');
+          const cached = await redisClient.get(`dedup:${inputHash}`);
+          if (cached) {
+            cacheHits.inc();
+            console.log(`[Task Service] Dedup hit for ${type}:${inputHash.slice(0, 8)}`);
+            end({ status: 200 });
+            return res.status(200).json({ ...JSON.parse(cached), cache_hit: true, synthetic: true });
+          }
+        }
+      } catch (dedupErr) {
+        console.warn(`[Task Service] Dedup check failed: ${dedupErr.message}`);
+      }
     }
 
     let fileData = null;
@@ -169,23 +229,29 @@ app.post("/", upload.single("file"), async (req, res) => {
     const eventMessage = createEventMessage(task.id, TASK_QUEUED, { type: task.type, input: task.input });
     channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(eventMessage)), { persistent: true });
 
+    tasksCreated.inc({ type: task.type });
     console.log(`[Task Service] Task ${task.id} queued and event published`);
+    end({ status: 201 });
     res.status(201).json(task);
   } catch (err) {
     console.error("[Task Service] Error creating task:", err.message);
+    end({ status: 503 });
     res.status(503).json({ error: "Service temporarily unavailable due to infrastructure failure. Please try again later." });
   }
 });
 
 // List tasks
 app.get("/", async (_req, res) => {
+  const end = httpDuration.startTimer({ method: 'GET', route: '/tasks' });
   try {
     const result = await pool.query(
       "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 50"
     );
+    end({ status: 200 });
     res.json(result.rows);
   } catch (err) {
     console.error("[Task Service] Error listing tasks:", err.message);
+    end({ status: 503 });
     res.status(503).json({ error: "Tasks temporarily unavailable due to database connection issue." });
   }
 });
@@ -200,9 +266,11 @@ app.get("/:id", async (req, res) => {
       if (redisClient.isReady) {
         const cachedTask = await redisClient.get(`task:${id}`);
         if (cachedTask) {
+          cacheHits.inc();
           console.log(`[Task Service] Cache hit for task ${id}`);
           return res.json({ source: "redis", data: JSON.parse(cachedTask) });
         }
+        cacheMisses.inc();
       }
     } catch (redisErr) {
       console.warn(`[Task Service] Redis GET failed, caching is inoperational: ${redisErr.message}`);

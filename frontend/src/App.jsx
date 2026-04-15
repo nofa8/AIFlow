@@ -13,6 +13,8 @@ export default function App() {
   const [wsStatus, setWsStatus] = useState('disconnected')
   const [toasts, setToasts] = useState([])
   const [systemError, setSystemError] = useState(null)
+  const [healthData, setHealthData] = useState(null)
+  const [healthOpen, setHealthOpen] = useState(false)
   const wsRef = useRef(null)
   const toastId = useRef(0)
 
@@ -88,6 +90,19 @@ export default function App() {
   // ─── Initial load ─────────────────────────────────────────
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
+  // ─── Health polling ───────────────────────────────────────
+  useEffect(() => {
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/health/all`)
+        if (res.ok) setHealthData(await res.json())
+      } catch { /* silent */ }
+    }
+    fetchHealth()
+    const interval = setInterval(fetchHealth, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   // ─── Submit task ──────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -108,10 +123,14 @@ export default function App() {
       if (res.ok) {
         const task = await res.json()
         setSystemError(null)
+        if (task.cache_hit) {
+          addToast(`⚡ Cached result returned instantly`)
+        } else {
+          addToast(`Task ${task.id.slice(0, 8)}… queued`)
+        }
         setTasks(prev => [task, ...prev])
         setInput('')
         setFile(null)
-        addToast(`Task ${task.id.slice(0, 8)}… queued`)
       } else {
         const err = await res.json()
         const errMsg = err.error || 'Failed to create task'
@@ -236,6 +255,26 @@ export default function App() {
         </div>
       )}
 
+      {/* System Status Panel */}
+      <div className="health-panel">
+        <button className="health-toggle" onClick={() => setHealthOpen(o => !o)}>
+          <span className={`health-dot ${healthData?.overall === 'healthy' ? 'up' : 'down'}`} />
+          {healthData?.overall === 'healthy' ? '✅ All Systems Operational' : '⚠️ System Degraded'}
+          <span className="health-chevron">{healthOpen ? '▲' : '▼'}</span>
+        </button>
+        {healthOpen && healthData && (
+          <div className="health-grid">
+            {healthData.services.map(s => (
+              <div key={s.name} className="health-row">
+                <span className={`health-dot ${s.status}`} />
+                <span className="health-name">{s.name}</span>
+                <span className="health-ms">{s.responseMs}ms</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Create Task */}
       <section className="create-task">
         <h2>New Task</h2>
@@ -330,11 +369,16 @@ export default function App() {
 
                 {/* --- NEW DYNAMIC RESULT AREA --- */}
                 <div className={`task-result-area ${task.status}`}>
-                  {task.result?.provider && task.status === 'completed' && (
+                  {task.status === 'completed' && (
                     <div className="provider-wrapper">
-                      <span className={`provider-badge ${task.result.provider}`}>
-                        {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
-                      </span>
+                      {task.result?.provider && (
+                        <span className={`provider-badge ${task.result.provider}`}>
+                          {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
+                        </span>
+                      )}
+                      {task.cache_hit && (
+                        <span className="provider-badge cached">⚡ CACHED</span>
+                      )}
                     </div>
                   )}
                   
