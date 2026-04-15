@@ -6,6 +6,7 @@ volumes:
   postgres_data:
   minio_data:
   redis_data:
+  grafana_data:
 
 services:
 
@@ -54,6 +55,25 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis-exporter:
+    image: docker.io/oliver006/redis_exporter:latest
+    container_name: aiflow_redis_exporter
+    restart: on-failure
+    networks:
+      - aiflow-net
+    environment:
+      - REDIS_ADDR=${REDIS_URL}
+    ports:
+      - "9121:9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9121/metrics || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -126,6 +146,8 @@ services:
     env_file: .env
     networks:
       - aiflow-net
+    # deploy:
+    #   replicas: 3
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -194,6 +216,11 @@ services:
         condition: service_healthy
       realtime-service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # tunnel:
   #   container_name: aiflow_tunnel
@@ -226,6 +253,11 @@ services:
         condition: service_healthy
       worker:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   grafana:
     image: grafana/grafana:11.6.0
@@ -236,7 +268,14 @@ services:
       - aiflow-net
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro,z
+      - grafana_data:/var/lib/grafana
     ports:
       - "3002:3000" 
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

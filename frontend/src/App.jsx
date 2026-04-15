@@ -68,7 +68,8 @@ export default function App() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'task_update') {
-          // Re-fetch to get full updated data
+          // The backend now deterministically tracks everything!
+          // We can just rely on the Single Source of Truth
           fetchTasks()
           addToast(`Task ${data.taskId.slice(0, 8)}… → ${data.status}`, data.status === 'failed')
         }
@@ -106,9 +107,14 @@ export default function App() {
   // ─── Submit task ──────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!input.trim() && !file) return
 
     setSubmitting(true)
+    
+    // Add temp task optimistically
+    const tempId = Date.now().toString()
+    setTasks(prev => [{ id: tempId, status: "pending", type, input, created_at: new Date().toISOString() }, ...prev])
+
     try {
       const formData = new FormData()
       formData.append('type', type)
@@ -121,14 +127,27 @@ export default function App() {
       })
 
       if (res.ok) {
-        const task = await res.json()
+        const taskData = await res.json()
         setSystemError(null)
-        if (task.cache_hit) {
+        
+        if (taskData.cache_hit === true || taskData.status === "completed") {
           addToast(`⚡ Cached result returned instantly`)
+          setTasks(prev => {
+            const updated = prev.map(t => 
+              t.id === tempId ? { ...t, ...taskData, status: "completed" } : t
+            )
+            return updated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          })
         } else {
-          addToast(`Task ${task.id.slice(0, 8)}… queued`)
+          addToast(`Task ${taskData.id.slice(0, 8)}… queued`)
+          setTasks(prev => {
+            const updated = prev.map(t => 
+              t.id === tempId ? { ...t, id: taskData.id } : t
+            )
+            return updated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          })
         }
-        setTasks(prev => [task, ...prev])
+        
         setInput('')
         setFile(null)
       } else {
@@ -136,10 +155,13 @@ export default function App() {
         const errMsg = err.error || 'Failed to create task'
         setSystemError(errMsg)
         addToast(errMsg, true)
+        // Rollback optimistic task
+        setTasks(prev => prev.filter(t => t.id !== tempId))
       }
     } catch (err) {
       setSystemError('Network error connecting to API.')
       addToast('Network error', true)
+      setTasks(prev => prev.filter(t => t.id !== tempId))
     } finally {
       setSubmitting(false)
     }

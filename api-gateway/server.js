@@ -35,7 +35,7 @@ const HEALTH_TARGETS = [
   { name: "Task Service",    url: "http://aiflow_task_service:3001/health" },
   { name: "Worker",          url: "http://aiflow_worker:4002/" },
   { name: "Realtime",        url: "http://aiflow_realtime_service:4001/" },
-  { name: "RabbitMQ",        url: "http://aiflow_rabbitmq:15672/api/healthchecks/node" },
+  { name: "RabbitMQ",        url: "http://aiflow_rabbitmq:15672/api/healthchecks/node", allowAuthErrors: true },
   { name: "Redis",           url: "http://aiflow_redis:6379",  tcp: true },
   { name: "PostgreSQL",      url: "http://aiflow_postgres:5432", tcp: true },
 ];
@@ -53,7 +53,6 @@ app.get("/health/all", async (_req, res) => {
           
           socket.setTimeout(3000);
           
-          // If we connect successfully, close it immediately and return 'up'
           socket.on('connect', () => {
             socket.destroy();
             resolve({ name: target.name, status: "up", responseMs: Date.now() - start });
@@ -68,13 +67,21 @@ app.get("/health/all", async (_req, res) => {
             resolve({ name: target.name, status: "down", responseMs: Date.now() - start, error: err.message });
           });
           
-          // Connect using the hostname and port from the URL
           socket.connect(urlObj.port, urlObj.hostname);
         });
       }
 
-      // Handle HTTP services (Task, Worker, Realtime, RabbitMQ)
-      return axios.get(target.url, { timeout: 3000 })
+      // Handle HTTP services
+      const axiosConfig = { timeout: 3000 };
+      
+      // If the service allows auth errors (RabbitMQ), override the status validation
+      if (target.allowAuthErrors) {
+        axiosConfig.validateStatus = (status) => {
+          return status < 500 && status !== 404;
+        };
+      }
+
+      return axios.get(target.url, axiosConfig)
         .then(() => ({ name: target.name, status: "up", responseMs: Date.now() - start }))
         .catch((err) => ({ name: target.name, status: "down", responseMs: Date.now() - start, error: err.message }));
     })

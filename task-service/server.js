@@ -190,9 +190,32 @@ app.post("/", upload.single("file"), async (req, res) => {
           const cached = await redisClient.get(`dedup:${inputHash}`);
           if (cached) {
             cacheHits.inc();
-            console.log(`[Task Service] Dedup hit for ${type}:${inputHash.slice(0, 8)}`);
+            
             end({ status: 200 });
-            return res.status(200).json({ ...JSON.parse(cached), cache_hit: true, synthetic: true });
+            const parsedCached = JSON.parse(cached);
+            const cachedResultData = parsedCached.result;
+            console.log(cachedResultData);
+            // 🔥 THE TRICK: Create a Virtual Task record
+            const inserted = await pool.query(
+              `INSERT INTO tasks (type, input, status, result)
+               VALUES ($1, $2, 'completed', $3::jsonb)
+               RETURNING *`,
+              [type, input.trim(), JSON.stringify(cachedResultData)]
+            );
+            const virtualTask = inserted.rows[0];
+
+            const { createEventMessage } = require("./shared/taskSchema");
+            const { REALTIME_QUEUE } = require("./shared/queues");
+            const { TASK_COMPLETED } = require("./shared/events");
+
+            // Notify Realtime service so other open tabs/windows see the updated event stream
+            const eventMessage = createEventMessage(virtualTask.id, TASK_COMPLETED, cachedResultData);
+            channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(eventMessage)), { persistent: true });
+            console.log(`[Task Service] Dedup hit for ${type}:${inputHash.slice(0, 8)}`);
+            return res.status(200).json({ 
+              ...virtualTask, 
+              cache_hit: true 
+            });
           }
         }
       } catch (dedupErr) {
