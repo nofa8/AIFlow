@@ -1,68 +1,153 @@
-# Deployment & Infrastructure Guide
+# 🚀 Deployment & Infrastructure Guide
 
-AIFlow is designed to be fully containerized. This guide explains how to manage the infrastructure using Docker Compose.
+AIFlow is a fully containerized, cloud-native microservices platform. This guide explains how to configure, deploy, and operate the system using Docker Compose.
 
-## Environment Configuration
+---
 
-All services rely on the `.env` file at the root. Key variables include:
+## ⚙️ Environment Configuration
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `POSTGRES_PASSWORD` | Database root password | `aiflow_secret` |
-| `RABBITMQ_HOST` | Hostname for the broker | `rabbitmq` |
-| `REDIS_URL` | Redis connection string | `redis://redis:6379` |
-| `MINIO_ENDPOINT` | MinIO Cloud service endpoint | `minio` |
-| `MINIO_ROOT_USER` | Root MinIO Access credential | `minioadmin` |
-| `MINIO_ROOT_PASSWORD` | Root MinIO Secret credential | `minioadmin` |
-| `GEMINI_API_KEY` | Secure Auth Key for LLMs | `...` |
+All services are configured via a root `.env` file.
 
-## Service Orchestration
-
-### Dependency Management
-
-The services use Docker `healthchecks` to ensure stable startup sequences:
-
-1. **PostgreSQL**, **RabbitMQ**, **Redis** and **MinIO** start first.
-2. **Task Service** and **Worker** wait for DB/Broker/Cache/S3 to be `healthy`.
-3. **API Gateway** starts once the Task Service is ready.
-4. **NGINX** starts as the final routing layer.
-
-### Network Isolation
-
-All services communicate over a private bridge network called `aiflow-net`.
-
-- Only **NGINX** (80), **RabbitMQ UI** (15672), and **MinIO UI** (9000, 9001) expose ports to the host machine for local dashboard monitoring.
-- Direct access to the database or message broker is restricted to the internal network.
-
-## Persistence
-
-AIFlow uses two managed Docker volumes:
-
-1. `postgres_data`: Ensures AI task results and logs survive container restarts.
-2. `minio_data`: Safely isolates all S3 multi-modal binaries (`.pdf`, `.png`, `.jpg`). The `task-service` buffers payloads locally then offloads them here asynchronously prior to Worker execution, guaranteeing the compute nodes remain `stateless`.
-
-## Scaling and Maintenance
-
-### Horizontal Scaling
-
-The system is ready for parallel processing. You can increase the number of workers to handle higher loads:
+Start from:
 
 ```bash
-docker compose up -d --scale worker=5
+cp .env.example .env
 ```
 
-### Resource Clean-up
+### 🔑 Core Infrastructure Variables
 
-To stop the cluster and remove all volumes (WARNING: deletes data):
+| Variable            | Description                              |
+| ------------------- | ---------------------------------------- |
+| `POSTGRES_USER`     | PostgreSQL user                          |
+| `POSTGRES_PASSWORD` | PostgreSQL password                      |
+| `POSTGRES_DB`       | Database name                            |
+| `POSTGRES_HOST`     | Internal DB hostname (`aiflow_postgres`) |
+| `POSTGRES_PORT`     | Default: `5432`                          |
+| `RABBITMQ_HOST`     | RabbitMQ hostname (`aiflow_rabbitmq`)    |
+| `REDIS_URL`         | Redis connection string                  |
 
-```bash
-docker compose down -v
+---
+
+### 🧠 External AI APIs (Required for Real AI Features)
+
+AIFlow supports **real AI processing + fallback to mock**.
+
+#### 1. Hugging Face (Text Sentiment)
+
+* Used for: `hf-sentiment`
+* Get API Key:
+
+  1. Go to: [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+  2. Create a **Read Token**
+
+```env
+HUGGINGFACE_API_KEY=hf_...
 ```
 
-### Logs
+---
 
-Monitor all services in real-time:
+#### 2. Google Gemini (Multimodal AI)
 
-```bash
-docker compose logs -f
+* Used for:
+
+  * Chat (`gemini-chat`)
+  * Image analysis (`gemini-image`)
+  * PDF analysis (`gemini-pdf`)
+
+* Get API Key:
+
+  1. Go to: [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+  2. Generate API key
+
+```env
+GEMINI_API_KEY=AIza...
 ```
+
+> ⚠️ If keys are missing or fail, the system **automatically falls back to mock AI**, ensuring resilience.
+
+---
+
+### 🪣 MinIO (S3 Object Storage)
+
+MinIO replaces shared volumes with **true object storage**.
+
+| Variable              | Description                    |
+| --------------------- | ------------------------------ |
+| `MINIO_ENDPOINT`      | Service hostname (`minio`)     |
+| `MINIO_PORT`          | API port (`9000`)              |
+| `MINIO_ROOT_USER`     | Access key                     |
+| `MINIO_ROOT_PASSWORD` | Secret key                     |
+| `MINIO_BUCKET`        | Default bucket (`uploads`)     |
+| `MINIO_SERVER_URL`    | Public URL for presigned links |
+
+Example:
+
+```env
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+MINIO_BUCKET=uploads
+MINIO_SERVER_URL=http://localhost
+```
+
+### 📦 MinIO Behavior
+
+* Files are uploaded via `multer.memoryStorage()`
+* Stored as objects (`objectName`)
+* Worker downloads temporarily to `/tmp`
+* Files are **deleted after processing**
+* UI uses **presigned URLs** for secure access (images, PDFs)
+
+---
+
+### 🌐 Cloudflare Tunnel (Optional Public Access)
+
+Expose your system securely without opening ports:
+
+```env
+CLOUDFLARE_TUNNEL_TOKEN=your_token
+```
+
+* Provides HTTPS public endpoint
+* Works seamlessly with NGINX
+
+---
+
+### 📊 Grafana Configuration
+
+```env
+GF_SECURITY_ADMIN_PASSWORD=admin
+GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+GF_SERVER_SERVE_FROM_SUB_PATH=true
+```
+
+* Access via: `http://localhost/grafana`
+
+---
+
+## 🐳 Service Orchestration
+
+AIFlow runs **13 containers**, grouped as:
+
+### Infrastructure Layer
+
+* PostgreSQL
+* Redis
+* RabbitMQ (with Prometheus plugin)
+* MinIO
+
+### Core Services
+
+* API Gateway
+* Task Service
+* Worker
+* Realtime Service
+
+### Edge Layer
+
+* NGINX (single entrypoint)
+* Cloudflare Tunnel (optional)
+
+### Observability
+
+* Prometheus
+* Grafana

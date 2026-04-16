@@ -193,6 +193,85 @@ body {
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
+/* ─── Health Status Panel ──────────────────────────────────── */
+
+.health-panel {
+  margin-bottom: 1.5rem;
+}
+
+.health-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.health-toggle:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.health-chevron {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.health-dot.up, .health-dot.healthy { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.health-dot.down, .health-dot.degraded { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+
+.health-grid {
+  margin-top: 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: slideDown 0.25s ease-out;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+}
+
+.health-name {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.health-ms {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
 /* ─── Create Task Form ──────────────────────────────────────── */
 
 .create-task {
@@ -424,6 +503,7 @@ body {
 .provider-badge.gemini { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
 .provider-badge.mock-fallback { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); }
 .provider-badge.mock { background: rgba(139, 156, 199, 0.15); color: var(--text-secondary); }
+.provider-badge.cached { background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); }
 
 .task-result pre {
   font-size: 0.8rem;

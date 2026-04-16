@@ -13,6 +13,8 @@ export default function App() {
   const [wsStatus, setWsStatus] = useState('disconnected')
   const [toasts, setToasts] = useState([])
   const [systemError, setSystemError] = useState(null)
+  const [healthData, setHealthData] = useState(null)
+  const [healthOpen, setHealthOpen] = useState(false)
   const wsRef = useRef(null)
   const toastId = useRef(0)
 
@@ -66,7 +68,8 @@ export default function App() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'task_update') {
-          // Re-fetch to get full updated data
+          // The backend now deterministically tracks everything!
+          // We can just rely on the Single Source of Truth
           fetchTasks()
           addToast(`Task ${data.taskId.slice(0, 8)}… → ${data.status}`, data.status === 'failed')
         }
@@ -88,12 +91,30 @@ export default function App() {
   // ─── Initial load ─────────────────────────────────────────
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
+  // ─── Health polling ───────────────────────────────────────
+  useEffect(() => {
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/health/all`)
+        if (res.ok) setHealthData(await res.json())
+      } catch { /* silent */ }
+    }
+    fetchHealth()
+    const interval = setInterval(fetchHealth, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   // ─── Submit task ──────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!input.trim() && !file) return
 
     setSubmitting(true)
+    
+    // Add temp task optimistically
+    const tempId = Date.now().toString()
+    setTasks(prev => [{ id: tempId, status: "pending", type, input, created_at: new Date().toISOString() }, ...prev])
+
     try {
       const formData = new FormData()
       formData.append('type', type)
@@ -106,21 +127,41 @@ export default function App() {
       })
 
       if (res.ok) {
-        const task = await res.json()
+        const taskData = await res.json()
         setSystemError(null)
-        setTasks(prev => [task, ...prev])
+        
+        if (taskData.is_cache_hit === true || taskData.status === "completed") {
+          addToast(`⚡ Cached result returned instantly`)
+          setTasks(prev => {
+            const updated = prev.map(t => 
+              t.id === tempId ? { ...t, ...taskData, status: "completed" } : t
+            )
+            return updated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          })
+        } else {
+          addToast(`Task ${taskData.id.slice(0, 8)}… queued`)
+          setTasks(prev => {
+            const updated = prev.map(t => 
+              t.id === tempId ? { ...t, id: taskData.id } : t
+            )
+            return updated.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          })
+        }
+        
         setInput('')
         setFile(null)
-        addToast(`Task ${task.id.slice(0, 8)}… queued`)
       } else {
         const err = await res.json()
         const errMsg = err.error || 'Failed to create task'
         setSystemError(errMsg)
         addToast(errMsg, true)
+        // Rollback optimistic task
+        setTasks(prev => prev.filter(t => t.id !== tempId))
       }
     } catch (err) {
       setSystemError('Network error connecting to API.')
       addToast('Network error', true)
+      setTasks(prev => prev.filter(t => t.id !== tempId))
     } finally {
       setSubmitting(false)
     }
@@ -236,6 +277,26 @@ export default function App() {
         </div>
       )}
 
+      {/* System Status Panel */}
+      <div className="health-panel">
+        <button className="health-toggle" onClick={() => setHealthOpen(o => !o)}>
+          <span className={`health-dot ${healthData?.overall === 'healthy' ? 'up' : 'down'}`} />
+          {healthData?.overall === 'healthy' ? '✅ All Systems Operational' : '⚠️ System Degraded'}
+          <span className="health-chevron">{healthOpen ? '▲' : '▼'}</span>
+        </button>
+        {healthOpen && healthData && (
+          <div className="health-grid">
+            {healthData.services.map(s => (
+              <div key={s.name} className="health-row">
+                <span className={`health-dot ${s.status}`} />
+                <span className="health-name">{s.name}</span>
+                <span className="health-ms">{s.responseMs}ms</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Create Task */}
       <section className="create-task">
         <h2>New Task</h2>
@@ -326,15 +387,30 @@ export default function App() {
                   {task.type.includes('gemini') && task.input === '' 
                     ? <em>No text provided, only file analyzed.</em> 
                     : task.input}
+                  {task.imageUrl && task.type === 'gemini-image' && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <img src={task.imageUrl} alt="Uploaded media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px' }}/>
+                    </div>
+                  )}
+                  {task.imageUrl && task.type === 'gemini-pdf' && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <a href={task.imageUrl} target="_blank" rel="noopener noreferrer" className="btn" style={{fontSize: '0.8rem', padding: '0.3rem 0.6rem'}}>📎 View PDF Document</a>
+                    </div>
+                  )}
                 </div>
 
                 {/* --- NEW DYNAMIC RESULT AREA --- */}
                 <div className={`task-result-area ${task.status}`}>
-                  {task.result?.provider && task.status === 'completed' && (
+                  {task.status === 'completed' && (
                     <div className="provider-wrapper">
-                      <span className={`provider-badge ${task.result.provider}`}>
-                        {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
-                      </span>
+                      {task.result?.provider && (
+                        <span className={`provider-badge ${task.result.provider}`}>
+                          {task.result.provider === 'mock-fallback' ? '⚠️ FALLBACK' : task.result.provider}
+                        </span>
+                      )}
+                      {task.is_cache_hit && (
+                        <span className="provider-badge cached">⚡ CACHED</span>
+                      )}
                     </div>
                   )}
                   

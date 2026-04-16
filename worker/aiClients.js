@@ -25,29 +25,18 @@ async function hfSentiment(input) {
     throw new Error("Missing HF API key");
   }
 
-  let lastError;
-  // 2 attempts retry block
-  for (let i = 0; i < 2; i++) {
-    try {
-      const output = await hfClient.textClassification({
-        model: "distilbert-base-uncased-finetuned-sst-2-english",
-        inputs: input,
-      });
+  const output = await hfClient.textClassification({
+    model: "distilbert-base-uncased-finetuned-sst-2-english",
+    inputs: input,
+  });
 
-      // Unified Schema
-      const best = Array.isArray(output) ? output.sort((a,b) => b.score - a.score)[0] : output;
-      return {
-        provider: "huggingface",
-        type: "sentiment",
-        data: best,
-      };
-    } catch (err) {
-      lastError = err;
-      // Wait 1 second before retrying
-      if (i === 0) await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
-  throw lastError;
+  // Unified Schema
+  const best = Array.isArray(output) ? output.sort((a,b) => b.score - a.score)[0] : output;
+  return {
+    provider: "huggingface",
+    type: "sentiment",
+    data: best,
+  };
 }
 
 async function geminiChat(input) {
@@ -55,29 +44,18 @@ async function geminiChat(input) {
     throw new Error("Missing Gemini API key");
   }
 
-  let lastError;
-  // 2 attempts retry block
-  for (let i = 0; i < 2; i++) {
-    try {
-      // Create a slightly more reliable config according to GenAI docs
-      const res = await gemini.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: input,
-      });
+  // Create a slightly more reliable config according to GenAI docs
+  const res = await gemini.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: input,
+  });
 
-      // Unified Schema
-      return {
-        provider: "gemini",
-        type: "chat",
-        data: { text: res.text },
-      };
-    } catch (err) {
-      lastError = err;
-      // Wait 1 second before retrying
-      if (i === 0) await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
-  throw lastError;
+  // Unified Schema
+  return {
+    provider: "gemini",
+    type: "chat",
+    data: { text: res.text },
+  };
 }
 
 async function geminiImage(filePath, mimeType) {

@@ -2,17 +2,45 @@ const amqp = require("amqplib");
 const { Pool } = require("pg");
 const redis = require("redis");
 const http = require("http");
+const promClient = require("prom-client");
 
-// ─── Health Endpoint (HTTP) ────────────────────────────────────
-const HEALTH_PORT = process.env.WORKER_HEALTH_PORT || 4002;
-http.createServer((_req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "ok", service: "worker" }));
-}).listen(HEALTH_PORT, () => {
-  console.log(`[Worker] Health endpoint on port ${HEALTH_PORT}`);
+// ─── Prometheus Metrics ─────────────────────────────────────────
+promClient.collectDefaultMetrics();
+
+const tasksProcessed = new promClient.Counter({
+  name: 'aiflow_tasks_processed_total',
+  help: 'Total tasks processed by worker',
+  labelNames: ['type', 'status']
 });
 
-const { TASK_QUEUE, REALTIME_QUEUE } = require("./shared/queues");
+const processingDuration = new promClient.Histogram({
+  name: 'aiflow_task_processing_seconds',
+  help: 'Task processing duration in seconds',
+  labelNames: ['type'],
+  buckets: [0.1, 0.5, 1, 2, 5, 10, 30]
+});
+
+const aiCalls = new promClient.Counter({
+  name: 'aiflow_ai_calls_total',
+  help: 'AI provider calls',
+  labelNames: ['provider', 'outcome']
+});
+
+// ─── Health + Metrics Endpoint (HTTP) ────────────────────────
+const HEALTH_PORT = process.env.WORKER_HEALTH_PORT || 4002;
+http.createServer(async (req, res) => {
+  if (req.url === '/metrics') {
+    res.writeHead(200, { "Content-Type": promClient.register.contentType });
+    res.end(await promClient.register.metrics());
+  } else {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", service: "worker" }));
+  }
+}).listen(HEALTH_PORT, () => {
+  console.log(`[Worker] Health + metrics endpoint on port ${HEALTH_PORT}`);
+});
+
+const { TASK_QUEUE, REALTIME_QUEUE, TASK_DLQ } = require("./shared/queues");
 const { createEventMessage } = require("./shared/taskSchema");
 const { TASK_STARTED, TASK_COMPLETED, TASK_FAILED } = require("./shared/events");
 // ─── PostgreSQL ─────────────────────────────────────────────────
@@ -54,6 +82,7 @@ async function connectRedis() {
 const { hfSentiment, geminiChat, geminiImage, geminiPDF, geminiURLSummary } = require("./aiClients");
 const { downloadFile } = require("./minioClient");
 const fs = require("fs");
+const crypto = require("crypto");
 
 // ─── AI Processing (Mocks & Fallbacks) ─────────────────────────
 
@@ -193,13 +222,26 @@ async function connectRabbitMQ() {
     try {
       const conn = await amqp.connect(`amqp://${process.env.RABBITMQ_HOST}`);
       conn.on("error", (err) => console.error("[Worker] RabbitMQ Connection Error:", err.message));
-      conn.on("close", () => console.error("[Worker] RabbitMQ Connection Closed"));
+      conn.on("close", () => {
+        console.error("[Worker] RabbitMQ connection lost. Exiting for restart…");
+        process.exit(1);
+      });
       
       const channel = await conn.createChannel();
       channel.on("error", (err) => console.error("[Worker] RabbitMQ Channel Error:", err.message));
-      channel.on("close", () => console.error("[Worker] RabbitMQ Channel Closed"));
+      channel.on("close", () => {
+        console.error("[Worker] RabbitMQ channel closed. Exiting for restart…");
+        process.exit(1);
+      });
       
-      await channel.assertQueue(TASK_QUEUE, { durable: true });
+      await channel.assertQueue(TASK_QUEUE, {
+        durable: true,
+        arguments: {
+          'x-dead-letter-exchange': '',
+          'x-dead-letter-routing-key': TASK_DLQ
+        }
+      });
+      await channel.assertQueue(TASK_DLQ, { durable: true });
       await channel.assertQueue(REALTIME_QUEUE, { durable: true });
       console.log("[Worker] RabbitMQ connected");
       return channel;
@@ -246,8 +288,13 @@ async function start() {
         console.warn(`[Worker] Could not send TASK_STARTED for ${taskId}:`, e.message);
       }
 
-      // Run AI
+      // Run AI (timed for Prometheus)
+      const endTimer = processingDuration.startTimer({ type });
       const result = await processTask(type, input, objectName, mimeType);
+      endTimer();
+
+      // Track AI provider call
+      aiCalls.inc({ provider: result.provider || 'unknown', outcome: 'success' });
 
       // Mark as completed
       await pool.query(
@@ -259,11 +306,19 @@ async function start() {
       try {
         if (redisClient.isReady) {
           await redisClient.del(`task:${taskId}`);
+
+          // Store dedup cache (text tasks only, 10 min TTL)
+          if (input && input.trim()) {
+            const inputHash = crypto.createHash('sha256').update(`${type}:${input.trim()}`).digest('hex');
+            const completedTask = { id: taskId, type, input, status: 'completed', result, created_at: new Date().toISOString() };
+            await redisClient.setEx(`dedup:${inputHash}`, 600, JSON.stringify(completedTask));
+          }
         }
       } catch (redisErr) {
-        console.warn(`[Worker] Redis DEL failed, caching is inoperational: ${redisErr.message}`);
+        console.warn(`[Worker] Redis cache ops failed: ${redisErr.message}`);
       }
 
+      tasksProcessed.inc({ type, status: 'completed' });
       console.log(`[Worker] Task ${taskId} completed (cache invalidated)`);
 
       // Notify realtime service: TASK_COMPLETED
@@ -277,34 +332,58 @@ async function start() {
       channel.ack(msg);
     } catch (err) {
       console.error(`[Worker] Task ${taskId} failed:`, err.message);
+      
+      // We don't mark as permanently failed here yet.
+      // nack with requeue=false routes it to the DLQ.
+      channel.nack(msg, false, false);
+    }
+  });
+
+  // DLQ Consumer
+  channel.consume(TASK_DLQ, async (msg) => {
+    if (!msg) return;
+
+    const taskMessage = JSON.parse(msg.content.toString());
+    const { taskId, type } = taskMessage;
+    const deaths = msg.properties.headers?.['x-death'] || [];
+    const retryCount = deaths[0]?.count || 1;
+
+    console.log(`[Worker] DLQ received task ${taskId} (Retry ${retryCount}/3)`);
+
+    if (retryCount >= 3) {
+      // Permanently failed
+      console.error(`[Worker] Task ${taskId} permanently failed after 3 retries.`);
+      tasksProcessed.inc({ type, status: 'failed' });
+      aiCalls.inc({ provider: 'unknown', outcome: 'failure' });
 
       try {
         await pool.query(
           "UPDATE tasks SET status = 'failed', result = $1, updated_at = NOW() WHERE id = $2",
-          [JSON.stringify({ error: err.message }), taskId]
+          [JSON.stringify({ error: "Task failed after multiple retries." }), taskId]
         );
 
-        // Invalidate Redis cache on failure too
-        try {
-          if (redisClient.isReady) {
-            await redisClient.del(`task:${taskId}`);
-          }
-        } catch (redisErr) {
-          console.warn(`[Worker] Redis DEL failed: ${redisErr.message}`);
+        if (redisClient.isReady) {
+          await redisClient.del(`task:${taskId}`);
         }
 
-        // Notify realtime service: TASK_FAILED
-        try {
-          const failEvent = createEventMessage(taskId, TASK_FAILED, null, err.message);
-          channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(failEvent)), { persistent: true });
-        } catch (e) {
-          console.warn(`[Worker] Could not send TASK_FAILED for ${taskId}:`, e.message);
-        }
-      } catch (fallbackErr) {
-         console.error(`[Worker] Failed to record failure for task ${taskId}:`, fallbackErr.message);
+        const failEvent = createEventMessage(taskId, TASK_FAILED, null, "Task failed after multiple retries.");
+        channel.sendToQueue(REALTIME_QUEUE, Buffer.from(JSON.stringify(failEvent)), { persistent: true });
+      } catch (e) {
+        console.error(`[Worker] Failed to record permanent failure for task ${taskId}:`, e.message);
       } finally {
-         channel.ack(msg);
+        channel.ack(msg);
       }
+    } else {
+      // Retry with backoff (5s, 10s...)
+      const backoffMs = retryCount * 5000;
+      await new Promise(r => setTimeout(r, backoffMs));
+      
+      // Republish to main queue, persisting original headers so x-death is tracked
+      channel.sendToQueue(TASK_QUEUE, msg.content, { 
+        persistent: true,
+        headers: msg.properties.headers 
+      });
+      channel.ack(msg);
     }
   });
 }
