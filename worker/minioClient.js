@@ -8,6 +8,7 @@ const client = new Minio.Client({
   useSSL: false,
   accessKey: process.env.MINIO_ROOT_USER,
   secretKey: process.env.MINIO_ROOT_PASSWORD,
+  pathStyle: true
 });
 
 const bucket = process.env.MINIO_BUCKET;

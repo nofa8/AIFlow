@@ -280,8 +280,19 @@ app.get("/", async (_req, res) => {
     const result = await pool.query(
       "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 50"
     );
+    const tasks = result.rows;
+    const { getFileUrl } = require("./minioClient");
+
+    // 🔥 Transform file_paths into actual usable URLs
+    const tasksWithUrls = await Promise.all(tasks.map(async (task) => {
+      if (task.file_path) {
+        task.imageUrl = await getFileUrl(task.file_path);
+      }
+      return task;
+    }));
+
     end({ status: 200 });
-    res.json(result.rows);
+    res.json(tasksWithUrls);
   } catch (err) {
     console.error("[Task Service] Error listing tasks:", err.message);
     end({ status: 503 });

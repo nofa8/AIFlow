@@ -6,7 +6,9 @@ const client = new Minio.Client({
   useSSL: false,
   accessKey: process.env.MINIO_ROOT_USER,
   secretKey: process.env.MINIO_ROOT_PASSWORD,
+  pathStyle: true // 🔥 Essential for reverse proxies and avoiding certificate mismatch
 });
+
 
 const bucket = process.env.MINIO_BUCKET;
 
@@ -32,5 +34,40 @@ async function uploadFile(file) {
     mimeType: file.mimetype,
   };
 }
+/**
+ * Generates a temporary, secure URL for the browser to display the image.
+ * Default expiry is 24 hours (86400 seconds).
+ */
+async function getFileUrl(objectName) {
+  try {
+    let url = await client.presignedGetObject(bucket, objectName, 24 * 60 * 60);
+    
+    // We need to return a path that the browser can use via NGINX.
+    // Presigned URLs contain the 'Host' in the signature. 
+    // Our NGINX is configured to pass the correct Host header to MinIO.
+    const parsedUrl = new URL(url);
+    const publicPath = `/minio${parsedUrl.pathname}${parsedUrl.search}`;
+    return publicPath;
+  } catch (err) {
+    console.error(`[MinIO] Error generating URL: ${err.message}`);
+    return null;
+  }
+}
 
-module.exports = { uploadFile };
+/**
+ * Retrieves the raw buffer of the file. 
+ * Use this if your Worker needs to process the image (e.g., for AI analysis).
+ */
+async function getFileBuffer(objectName) {
+  return new Promise((resolve, reject) => {
+    let data = [];
+    client.getObject(bucket, objectName, (err, dataStream) => {
+      if (err) return reject(err);
+      dataStream.on('data', (chunk) => data.push(chunk));
+      dataStream.on('end', () => resolve(Buffer.concat(data)));
+      dataStream.on('error', (err) => reject(err));
+    });
+  });
+}
+
+module.exports = { uploadFile, getFileUrl, getFileBuffer };

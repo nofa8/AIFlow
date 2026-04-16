@@ -387,6 +387,16 @@ export default function App() {
                   {task.type.includes('gemini') && task.input === '' 
                     ? <em>No text provided, only file analyzed.</em> 
                     : task.input}
+                  {task.imageUrl && task.type === 'gemini-image' && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <img src={task.imageUrl} alt="Uploaded media" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px' }}/>
+                    </div>
+                  )}
+                  {task.imageUrl && task.type === 'gemini-pdf' && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <a href={task.imageUrl} target="_blank" rel="noopener noreferrer" className="btn" style={{fontSize: '0.8rem', padding: '0.3rem 0.6rem'}}>📎 View PDF Document</a>
+                    </div>
+                  )}
                 </div>
 
                 {/* --- NEW DYNAMIC RESULT AREA --- */}
